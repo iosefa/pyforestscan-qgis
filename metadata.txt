@@ -1,0 +1,17 @@
+[general]
+name=PyForestScan
+description=QGIS Processing wrappers for PyForestScan LiDAR forest structure metrics.
+about=Runs PyForestScan workflows from the QGIS Processing Toolbox for local LAS/LAZ/COPC/EPT inputs and tiled EPT jobs.
+version=0.1.0
+qgisMinimumVersion=3.22
+author=Joseph Emile Honour Percival
+email=ipercival@gmail.com
+category=Analysis
+tags=LiDAR,forestry,forest structure,point cloud,PDAL,PyForestScan
+homepage=
+repository=
+tracker=
+icon=icons/icon.svg
+experimental=True
+deprecated=False
+hasProcessingProvider=yes

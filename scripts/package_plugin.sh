@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PLUGIN_ID="pyforestscan_qgis"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DIST_DIR="${ROOT_DIR}/dist"
+BUILD_DIR="${DIST_DIR}/${PLUGIN_ID}"
+ZIP_FILE="${DIST_DIR}/${PLUGIN_ID}.zip"
+
+rm -rf "${BUILD_DIR}" "${ZIP_FILE}"
+mkdir -p "${BUILD_DIR}"
+
+cp "${ROOT_DIR}/metadata.txt" "${BUILD_DIR}/"
+cp "${ROOT_DIR}/README.md" "${BUILD_DIR}/"
+cp "${ROOT_DIR}/__init__.py" "${BUILD_DIR}/"
+cp "${ROOT_DIR}/pyforestscan_plugin.py" "${BUILD_DIR}/"
+cp "${ROOT_DIR}/provider.py" "${BUILD_DIR}/"
+cp -R "${ROOT_DIR}/algorithms" "${BUILD_DIR}/"
+cp -R "${ROOT_DIR}/icons" "${BUILD_DIR}/"
+find "${BUILD_DIR}" -type d -name "__pycache__" -prune -exec rm -rf {} +
+find "${BUILD_DIR}" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
+
+(
+  cd "${DIST_DIR}"
+  zip -qr "${ZIP_FILE}" "${PLUGIN_ID}"
+)
+
+echo "${ZIP_FILE}"

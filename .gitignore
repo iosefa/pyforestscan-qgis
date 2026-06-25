@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.DS_Store
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.zip
+
+# Local handoff notes for Codex sessions.
+CODEX_PLAN.md
