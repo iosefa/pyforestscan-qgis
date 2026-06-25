@@ -13,6 +13,7 @@ REQUIRED_MODULES = [
     ("scipy", "SciPy"),
     ("pyproj", "pyproj"),
     ("shapely", "Shapely"),
+    ("tqdm", "tqdm"),
 ]
 
 RUNTIME_MODULES = [

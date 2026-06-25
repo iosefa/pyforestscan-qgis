@@ -55,8 +55,15 @@ Use the `Check PyForestScan Dependencies` processing algorithm first. It imports
 Recommended dependency strategy for the first release is a conda environment that includes QGIS-compatible geospatial binaries:
 
 ```bash
-conda install -c conda-forge qgis pdal python-pdal rasterio geopandas pyproj shapely scipy numpy pandas
-pip install pyforestscan
+conda env create -f environment.yml
+conda activate pyforestscan-qgis
+```
+
+If you are adding dependencies to an existing QGIS Python environment, install the compiled packages with conda first, then install PyForestScan without replacing those binaries:
+
+```bash
+conda install -c conda-forge qgis python-pdal rasterio geopandas pyproj shapely scipy numpy pandas matplotlib tqdm
+python -m pip install --no-deps pyforestscan==0.2.4
 ```
 
 Exact environment management differs by QGIS distribution. The important constraint is that `import pyforestscan`, `import pdal`, `import rasterio`, and `import geopandas` must work from QGIS's Python console.
@@ -67,4 +74,4 @@ Exact environment management differs by QGIS distribution. The important constra
 - Tiled processing does not yet expose QGIS progress/cancellation inside the tile loop because the current PyForestScan `process_with_tiles` API does not accept callbacks.
 - Tiled processing currently supports CHM, PAI, and FHD through PyForestScan core.
 - Polygon crop assumes the polygon is already in the LiDAR CRS.
-- Remote repository creation, public publishing, and commits are intentionally out of scope until explicitly approved.
+- Publishing to the QGIS plugin repository is out of scope for the initial scaffold.

@@ -1,0 +1,17 @@
+name: pyforestscan-qgis
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - qgis=3.40
+  - python-pdal=3.4.5
+  - rasterio=1.4
+  - geopandas=1.1
+  - scipy
+  - shapely
+  - pandas
+  - matplotlib
+  - tqdm
+  - pip
+  - pip:
+      - pyforestscan==0.2.4
