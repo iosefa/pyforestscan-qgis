@@ -11,8 +11,10 @@ from qgis.core import (
     QgsProcessingParameterEnum,
     QgsProcessingParameterExtent,
     QgsProcessingParameterFeatureSource,
+    QgsProcessingParameterFile,
     QgsProcessingParameterFolderDestination,
     QgsProcessingParameterNumber,
+    QgsProcessingParameterPointCloudLayer,
     QgsProcessingParameterRasterLayer,
     QgsProcessingParameterString,
 )
@@ -36,7 +38,9 @@ from .common import (
 
 
 class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
+    INPUT_LAYER = "INPUT_LAYER"
     INPUT = "INPUT"
+    INPUT_URL = "INPUT_URL"
     INPUT_CRS = "INPUT_CRS"
     BOUNDS = "BOUNDS"
     POLYGON = "POLYGON"
@@ -87,9 +91,27 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
 
     def initAlgorithm(self, config=None):
         self.addParameter(
-            QgsProcessingParameterString(
+            QgsProcessingParameterPointCloudLayer(
+                self.INPUT_LAYER,
+                "Input loaded point cloud layer",
+                optional=True,
+            )
+        )
+        self.addParameter(
+            QgsProcessingParameterFile(
                 self.INPUT,
-                "Input LAS/LAZ/COPC/EPT ept.json path or URL",
+                "Input LAS/LAZ/COPC/EPT file",
+                behavior=QgsProcessingParameterFile.File,
+                extension="laz",
+                optional=True,
+                fileFilter="LiDAR and EPT files (*.las *.laz *.copc *.copc.laz ept.json);;LAS/LAZ files (*.las *.laz);;COPC files (*.copc *.copc.laz);;EPT metadata (ept.json);;All files (*.*)",
+            )
+        )
+        self.addParameter(
+            QgsProcessingParameterString(
+                self.INPUT_URL,
+                "Optional EPT URL",
+                optional=True,
             )
         )
         self.addParameter(
@@ -204,9 +226,18 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
         raise_for_missing_dependencies(QgsProcessingException)
         handlers, calculate = import_metric_runtime()
 
-        input_path = self.parameterAsString(parameters, self.INPUT, context).strip()
+        input_layer = self.parameterAsPointCloudLayer(parameters, self.INPUT_LAYER, context)
+        input_path = ""
+        if input_layer is not None:
+            input_path = input_layer.source().split("|", 1)[0].strip()
+        selected_file = self.parameterAsFile(parameters, self.INPUT, context).strip()
+        if selected_file:
+            input_path = selected_file
+        input_url = self.parameterAsString(parameters, self.INPUT_URL, context).strip()
+        if input_url:
+            input_path = input_url
         if not input_path:
-            raise QgsProcessingException("Input is required.")
+            raise QgsProcessingException("Choose a loaded point cloud layer, an input file, or provide an EPT URL.")
 
         input_crs = qgis_crs_to_string(self.parameterAsCrs(parameters, self.INPUT_CRS, context))
         if not input_crs and context.project() is not None:
