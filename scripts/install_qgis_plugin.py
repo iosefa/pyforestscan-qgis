@@ -23,6 +23,8 @@ IGNORED_SUFFIXES = {".pyc", ".pyo"}
 def default_profiles_root() -> Path:
     if sys.platform == "win32":
         return Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming")) / "QGIS/QGIS3/profiles"
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Application Support/QGIS/QGIS3/profiles"
     return Path.home() / ".local/share/QGIS/QGIS3/profiles"
 
 

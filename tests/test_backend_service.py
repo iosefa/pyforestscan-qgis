@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pyforestscan_qgis.core.backend.models import BackendStatus
+from pyforestscan_qgis.core.backend.models import BackendPlatform, BackendStatus
 from pyforestscan_qgis.core.backend.paths import resolve_backend_paths
 from pyforestscan_qgis.core.backend.service import BackendService
 
@@ -23,7 +23,7 @@ class BackendServiceTests(unittest.TestCase):
     def test_planned_operations_do_not_modify_system(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "backend"
-            service = BackendService(paths=resolve_backend_paths(backend_root=root))
+            service = BackendService(paths=resolve_backend_paths(backend_root=root, platform=BackendPlatform.MACOS, machine="x86_64"))
             results = (
                 service.install_backend(),
                 service.repair_backend(),

@@ -166,11 +166,11 @@ class BackendService:
 
     def install_availability(self) -> BackendInstallAvailability:
         """Return user-facing installer availability for the current build/platform."""
-        return backend_install_availability(platform=self.paths.platform)
+        return backend_install_availability(platform=self.paths.platform, machine=self.paths.architecture or None)
 
     def backend_install_enabled(self) -> bool:
         """Return whether real backend installation is enabled."""
-        return backend_install_enabled(platform=self.paths.platform)
+        return backend_install_enabled(platform=self.paths.platform, machine=self.paths.architecture or None)
 
     def installer(self) -> BackendInstaller:
         """Return a controlled installer bound to current paths."""

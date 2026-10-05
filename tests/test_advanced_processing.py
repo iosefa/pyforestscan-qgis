@@ -300,7 +300,7 @@ class AdvancedProcessingTests(unittest.TestCase):
             {"pyforestscan": fake_pyforestscan, "pyforestscan.handlers": fake_handlers},
         ):
             output = Path(temp_dir) / "pai.tif"
-            PyForestScanAdapter().create_pai(
+            PyForestScanAdapter(execution_mode="qgis_python").create_pai(
                 PaiRequest(
                     input_path="plot.laz",
                     output_path=output,
@@ -345,7 +345,7 @@ class AdvancedProcessingTests(unittest.TestCase):
         fake_handlers.create_geotiff = create_geotiff  # type: ignore[attr-defined]
 
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(sys.modules, {"pyforestscan": fake_pyforestscan, "pyforestscan.handlers": fake_handlers}):
-            result = PyForestScanAdapter().create_point_density(
+            result = PyForestScanAdapter(execution_mode="qgis_python").create_point_density(
                 PointDensityRequest(
                     input_path="plot.laz",
                     output_path=Path(temp_dir) / "density.tif",
@@ -376,7 +376,7 @@ class AdvancedProcessingTests(unittest.TestCase):
             dtype=[("X", "f8"), ("Y", "f8"), ("HeightAboveGround", "f8")],
         )
         with patch("pyforestscan_qgis.core.adapter._read_bounded_local_lidar", return_value=(point_array,)) as bounded:
-            result = PyForestScanAdapter()._read_point_density_array(request)
+            result = PyForestScanAdapter(execution_mode="qgis_python")._read_point_density_array(request)
         bounded.assert_called_once_with(request)
         self.assertIs(result, point_array)
 
@@ -395,7 +395,7 @@ class AdvancedProcessingTests(unittest.TestCase):
         fake_handlers = types.ModuleType("pyforestscan.handlers")
         fake_handlers.read_lidar = lambda *args, **kwargs: (points,)  # type: ignore[attr-defined]
         with patch.dict(sys.modules, {"pyforestscan.handlers": fake_handlers}):
-            prepared = PyForestScanAdapter()._read_point_density_array(request)
+            prepared = PyForestScanAdapter(execution_mode="qgis_python")._read_point_density_array(request)
         self.assertEqual((0.0, 4.0, 2.0), tuple(prepared["HeightAboveGround"]))
         cells: dict[tuple[int, int], int] = {}
         for point in prepared:
@@ -424,7 +424,7 @@ class AdvancedProcessingTests(unittest.TestCase):
         fake_handlers.create_geotiff = create_geotiff  # type: ignore[attr-defined]
 
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(sys.modules, {"pyforestscan": fake_pyforestscan, "pyforestscan.handlers": fake_handlers}):
-            result = PyForestScanAdapter().create_voxel_stat(
+            result = PyForestScanAdapter(execution_mode="qgis_python").create_voxel_stat(
                 VoxelStatRequest(
                     input_path="plot.laz",
                     output_path=Path(temp_dir) / "voxel_stat.tif",
@@ -447,7 +447,7 @@ class AdvancedProcessingTests(unittest.TestCase):
         fake_handlers.read_lidar = lambda *args, **kwargs: [point_array]  # type: ignore[attr-defined]
 
         with patch.dict(sys.modules, {"pyforestscan.handlers": fake_handlers}):
-            result = PyForestScanAdapter().normalize_heights(
+            result = PyForestScanAdapter(execution_mode="qgis_python").normalize_heights(
                 HagNormalizationRequest(input_path="plot.laz", crs="EPSG:32610")
             )
 
@@ -480,7 +480,7 @@ class AdvancedProcessingTests(unittest.TestCase):
         fake_handlers.create_geotiff = create_geotiff  # type: ignore[attr-defined]
 
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(sys.modules, {"pyforestscan": fake_pyforestscan, "pyforestscan.handlers": fake_handlers, "pyforestscan.filters": fake_filters}):
-            result = PyForestScanAdapter().generate_dtm(
+            result = PyForestScanAdapter(execution_mode="qgis_python").generate_dtm(
                 DtmRequest("plot.laz", Path(temp_dir) / "dtm.tif", "EPSG:32610", resolution=5.0, classify_ground=True, nodata=-999.0)
             )
             self.assertTrue(result.output_path.exists())
@@ -506,7 +506,7 @@ class AdvancedProcessingTests(unittest.TestCase):
         )
         with patch.dict(sys.modules, {"pyforestscan": fake_pyforestscan, "pyforestscan.handlers": fake_handlers, "pyforestscan.filters": fake_filters}):
             with patch("pyforestscan_qgis.core.adapter._read_bounded_local_lidar", return_value=(point_array,)) as bounded:
-                PyForestScanAdapter().generate_dtm(request)
+                PyForestScanAdapter(execution_mode="qgis_python").generate_dtm(request)
         bounded.assert_called_once_with(request)
 
     def test_dtm_normalizes_structured_matrix_to_records(self) -> None:
@@ -526,7 +526,7 @@ class AdvancedProcessingTests(unittest.TestCase):
         fake_pyforestscan.generate_dtm = lambda points, resolution=2.0: (np.ones((1, 1)), [0.0, 1.0, 0.0, 1.0])  # type: ignore[attr-defined]
         fake_handlers.create_geotiff = lambda layer, output_file, crs, extent, nodata=-9999: Path(output_file).write_text("fake", encoding="utf-8")  # type: ignore[attr-defined]
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(sys.modules, {"pyforestscan": fake_pyforestscan, "pyforestscan.handlers": fake_handlers, "pyforestscan.filters": fake_filters}):
-            result = PyForestScanAdapter().generate_dtm(DtmRequest("plot.laz", Path(temp_dir) / "dtm.tif", "EPSG:32610"))
+            result = PyForestScanAdapter(execution_mode="qgis_python").generate_dtm(DtmRequest("plot.laz", Path(temp_dir) / "dtm.tif", "EPSG:32610"))
             self.assertTrue(result.output_path.exists())
 
     def test_dtm_failure_persists_contract_diagnostic(self) -> None:
@@ -542,7 +542,7 @@ class AdvancedProcessingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(sys.modules, {"pyforestscan": fake_pyforestscan, "pyforestscan.handlers": fake_handlers, "pyforestscan.filters": fake_filters}):
             diagnostics = Path(temp_dir) / "diagnostics"
             with self.assertRaises(Exception):
-                PyForestScanAdapter().generate_dtm(DtmRequest("plot.laz", Path(temp_dir) / "dtm.tif", "EPSG:32610", diagnostics_path=diagnostics))
+                PyForestScanAdapter(execution_mode="qgis_python").generate_dtm(DtmRequest("plot.laz", Path(temp_dir) / "dtm.tif", "EPSG:32610", diagnostics_path=diagnostics))
             payload = json.loads((diagnostics / "dtm_failure.json").read_text(encoding="utf-8"))
             self.assertEqual(payload["exception_class"], "IndexError")
             self.assertIn("invalid index to scalar variable", payload["message"])
@@ -611,7 +611,7 @@ class AdvancedProcessingTests(unittest.TestCase):
         fake_handlers.write_las = lambda arrays, output_file, srs=None, compress=True: Path(output_file).write_text("fake", encoding="utf-8")  # type: ignore[attr-defined]
 
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(sys.modules, {"pyforestscan.handlers": fake_handlers, "pyforestscan.filters": fake_filters}):
-            PyForestScanAdapter().preprocess_point_cloud(
+            PyForestScanAdapter(execution_mode="qgis_python").preprocess_point_cloud(
                 PointCloudPreprocessRequest(
                     input_path="plot.laz",
                     output_path=Path(temp_dir) / "clean.laz",
@@ -666,7 +666,7 @@ class AdvancedProcessingTests(unittest.TestCase):
         fake_handlers.write_las = write_las  # type: ignore[attr-defined]
 
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(sys.modules, {"pyforestscan.handlers": fake_handlers, "pyforestscan.filters": fake_filters}):
-            result = PyForestScanAdapter().preprocess_point_cloud(
+            result = PyForestScanAdapter(execution_mode="qgis_python").preprocess_point_cloud(
                 PointCloudPreprocessRequest(
                     input_path="plot.laz",
                     output_path=Path(temp_dir) / "clean.laz",

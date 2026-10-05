@@ -158,7 +158,13 @@ class HeaderMetadataService:
         if options is None and not recursive:
             scan_options = CatalogBuildOptions(recursive=False, source_types=("las", "laz", "copc"))
         root_id = stable_root_id(normalized)
-        return tuple(self.inspect_path(path, normalized, root_id, repository_crs_override=repository_crs_override) for path in iter_lidar_paths(normalized, options=scan_options))
+        records = (
+            self.inspect_path(path, normalized, root_id, repository_crs_override=repository_crs_override)
+            for path in iter_lidar_paths(normalized, options=scan_options)
+        )
+        # Filesystem traversal order differs across platforms. Stable source
+        # order keeps execution plans and their signatures reproducible.
+        return tuple(sorted(records, key=lambda item: (str(item.path).casefold(), str(item.path))))
 
     def inspect_path(
         self,

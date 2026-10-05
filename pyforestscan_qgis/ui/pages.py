@@ -6223,7 +6223,7 @@ class SettingsPage(MissionPage):
         total_count = len(registry.dependencies)
         self.backend_dependency_label.setText(f"Verification: {required_count} required checks; {total_count - required_count} optional checks")
         self.zip_install_ready_label.setText("Plugin ZIP: ready for QGIS Plugin Manager installs")
-        auto_ready = "available on Windows beta builds" if availability.enabled else f"not available; {availability.reason}"
+        auto_ready = availability.reason if availability.enabled else f"not available; {availability.reason}"
         self.backend_auto_install_ready_label.setText(f"Backend installer: {auto_ready}")
         compat_text = version.message if version else "Backend recipe unavailable"
         self.qgis_compatibility_label.setText(f"QGIS compatibility: {compatibility.summary()}; backend {compat_text}")
@@ -6246,7 +6246,7 @@ class SettingsPage(MissionPage):
         self.backend_details.setPlainText(self.backend_service.format_install_plan(plan))
 
     def install_backend_internal_beta(self) -> None:
-        """Confirm and run the Windows internal beta backend installer."""
+        """Run the managed engine installer on an enabled platform."""
         availability = self.backend_service.install_availability()
         if not availability.enabled:
             self.backend_details.setPlainText(f"Install Backend is not available for this platform.\n\n{availability.reason}")
@@ -6518,12 +6518,12 @@ class SettingsPage(MissionPage):
             "ZIP installation installs only the QGIS plugin. PBM backend installation creates an isolated, user-local PyForestScan backend and does not install packages into QGIS Python, system Python, PATH, shell profiles, or QGIS folders.\n\n"
             "Current release status:\n"
             "- Plugin ZIP: ready for QGIS Plugin Manager installs.\n"
-            "- Backend installer: available on Windows beta builds after confirmation.\n"
+            "- Backend installer: Windows and Linux x86_64; Apple Silicon experimental.\n"
             "- Manual setup: not required after PBM backend installation verifies successfully; QGIS-Python-only tools still show their own requirements.\n\n"
             "Next steps:\n"
             "1. Install the ZIP through QGIS Plugin Manager.\n"
             "2. Open Mission Control and run Environment Check.\n"
-            "3. Open Backend settings and click Install Backend on Windows beta builds.\n"
+            "3. Open Tools & Setup and click Set Up Processing Engine.\n"
             "4. Setup publishes Ready automatically when all checks pass.\n\n"
             "Reference docs: docs/INSTALLATION_STRATEGY.md, docs/releases/CLEAN_MACHINE_SMOKE_TEST.md, and docs/releases/PBM_INTERNAL_BETA_SMOKE_TEST.md."
         )

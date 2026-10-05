@@ -8,7 +8,7 @@ from .manifest import BackendManifest, ManifestPackage, load_backend_manifest
 from .models import BackendDependency, BackendRegistry
 from .registry import default_backend_registry
 
-_REQUIRED_ENV_PACKAGES = ("python", "pdal", "python-pdal", "gdal", "rasterio", "numpy", "scipy", "pandas", "shapely", "pyproj", "fiona", "geopandas", "matplotlib", "tqdm", "pyforestscan")
+_REQUIRED_ENV_PACKAGES = ("python", "pdal", "python-pdal", "gdal", "rasterio", "numpy", "scipy", "pandas", "shapely", "pyproj", "fiona", "geopandas", "matplotlib", "tqdm", "requests", "pyforestscan")
 
 
 @dataclass(frozen=True)

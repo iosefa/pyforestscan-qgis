@@ -155,9 +155,21 @@ class BackendProcessEnvironmentTests(unittest.TestCase):
         self.assertTrue(result.success)
         command, kwargs = calls[0]
         self.assertEqual(command, backend_pip_install_command(staged.python_executable, ["pyforestscan>=0.4"]))
+        self.assertEqual(calls[1][0], [str(staged.python_executable), "-m", "pip", "check"])
         self.assertIn("--no-deps", command)
         self.assertNotIn("PYTHONUSERBASE", kwargs["env"])
         self.assertEqual(kwargs["env"]["PYTHONNOUSERSITE"], "1")
+
+    def test_install_rejects_unsatisfied_pyforestscan_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = resolve_backend_paths(backend_root=Path(tmpdir), platform=BackendPlatform.LINUX)
+            def runner(command, **kwargs):
+                checking = command[-1] == "check"
+                return subprocess.CompletedProcess(command, int(checking),
+                    stdout="pyforestscan requires numpy>=2.3.1" if checking else "installed", stderr="")
+            result = BackendInstaller(paths, environ={BACKEND_INSTALL_ENABLE_ENV: "1"}, runner=runner).install_python_packages()
+        self.assertFalse(result.success)
+        self.assertIn("requires numpy>=2.3.1", result.message)
 
     def test_failed_staging_cleanup_removes_empty_env_prefix_for_retry(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -109,6 +109,9 @@ class SpatialReferenceResolverTests(unittest.TestCase):
 
 class SourceLocalAdapterTests(unittest.TestCase):
     def setUp(self):
+        # These mocked scientific calls model a managed worker, even when a
+        # previous test has imported QGIS for CRS handling in this interpreter.
+        self.enterContext(patch.dict("os.environ", {"PYFORESTSCAN_MANAGED_ENGINE": "1"}))
         self.points = np.array([(268228.0, 2152129.0, 4.0), (268229.0, 2152130.0, 8.0)], dtype=[("X", "f8"), ("Y", "f8"), ("HeightAboveGround", "f8")])
 
     def test_unknown_crs_chm_reaches_science_without_fake_epsg(self):

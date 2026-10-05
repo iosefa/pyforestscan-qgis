@@ -26,11 +26,11 @@ class BackendInstallerTests(unittest.TestCase):
     """Validate installer guardrails and staged filesystem behavior."""
 
     def test_micromamba_url_selection_by_platform(self) -> None:
-        self.assertEqual(micromamba_source_url(BackendPlatform.LINUX), "https://micro.mamba.pm/api/micromamba/linux-64/latest")
-        self.assertEqual(micromamba_source_url(BackendPlatform.WINDOWS), "https://micro.mamba.pm/api/micromamba/win-64/latest")
-        self.assertEqual(micromamba_source_url(BackendPlatform.MACOS), "https://micro.mamba.pm/api/micromamba/osx-64/latest")
+        self.assertEqual(micromamba_source_url(BackendPlatform.LINUX, machine="x86_64"), "https://micro.mamba.pm/api/micromamba/linux-64/latest")
+        self.assertEqual(micromamba_source_url(BackendPlatform.WINDOWS, machine="x86_64"), "https://micro.mamba.pm/api/micromamba/win-64/latest")
+        self.assertEqual(micromamba_source_url(BackendPlatform.MACOS, machine="x86_64"), "https://micro.mamba.pm/api/micromamba/osx-64/latest")
         self.assertEqual(micromamba_source_url(BackendPlatform.UNKNOWN), "")
-        self.assertEqual(micromamba_archive_name(BackendPlatform.LINUX), "micromamba-linux-64.tar.bz2")
+        self.assertEqual(micromamba_archive_name(BackendPlatform.LINUX, machine="x86_64"), "micromamba-linux-64.tar.bz2")
 
     def test_checksum_policy_behavior(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -60,23 +60,36 @@ class BackendInstallerTests(unittest.TestCase):
 
     def test_internal_beta_guard_blocks_untested_platforms(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            paths = resolve_backend_paths(backend_root=Path(tmpdir) / "backend", platform=BackendPlatform.LINUX)
+            paths = resolve_backend_paths(backend_root=Path(tmpdir) / "backend", platform=BackendPlatform.MACOS, machine="x86_64")
             installer = BackendInstaller(paths=paths, environ={})
             result = installer.install_backend()
 
-        self.assertFalse(backend_install_enabled({}, BackendPlatform.LINUX))
+        self.assertFalse(backend_install_enabled({}, BackendPlatform.MACOS, machine="x86_64"))
         self.assertFalse(result.success)
         self.assertFalse(result.modified_system)
         self.assertIn("planned/experimental", result.message)
         self.assertFalse(paths.backend_root.exists())
 
     def test_windows_internal_beta_enables_install_without_env_var(self) -> None:
-        availability = backend_install_availability(environ={}, platform=BackendPlatform.WINDOWS)
+        availability = backend_install_availability(environ={}, platform=BackendPlatform.WINDOWS, machine="x86_64")
 
         self.assertTrue(availability.enabled)
-        self.assertTrue(backend_install_enabled({}, BackendPlatform.WINDOWS))
+        self.assertTrue(backend_install_enabled({}, BackendPlatform.WINDOWS, machine="x86_64"))
         self.assertFalse(availability.developer_override)
         self.assertIn("Windows internal beta", availability.reason)
+
+    def test_linux_x86_64_install_is_available_without_override(self) -> None:
+        availability = backend_install_availability({}, BackendPlatform.LINUX, machine="x86_64")
+        self.assertTrue(availability.enabled)
+        self.assertFalse(availability.developer_override)
+        self.assertFalse(backend_install_enabled({}, BackendPlatform.LINUX, machine="aarch64"))
+
+    def test_bootstrap_uses_manifest_artifact_and_required_checksum(self) -> None:
+        paths = resolve_backend_paths(platform=BackendPlatform.LINUX, machine="x86_64")
+        policy = micromamba_bootstrap_policy(paths)
+        self.assertIn("micromamba-2.9.0-0.tar.bz2", policy.source_url)
+        self.assertTrue(policy.checksum_policy.required)
+        self.assertEqual(len(policy.checksum_policy.expected), 64)
 
     def test_staging_path_creation_and_rollback(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

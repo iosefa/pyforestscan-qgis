@@ -23,9 +23,10 @@ QGIS 4 uses Qt 6; QGIS 3.44 LTR uses Qt 5.
 | Windows | x86_64 | 3.44.13 | Qt 5.15.13 | PASS | PASS | PASS | SUPPORTED WITH LIMITATIONS | 2026-09-03 | Phase 32Z 24-case scientific UI matrix passed; established Windows CHM canary remains exact. Current 3.44.14 still needs repetition. |
 | Windows | x86_64 | 4.0.0 | Qt 6 | PASS | NOT TESTED | NOT TESTED | UI-COMPATIBLE | 2026-09-03 | Scientific matrix plus 100 construction/unload and 100 navigation/state cycles passed from a clean extracted ZIP. Full provider/Prerun/engine/science gate remains open. |
 | Windows | x86_64 | 4.2.2 | Qt 6 | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | - | Current stable build was not installed on the test host. |
-| macOS | Apple Silicon | current 3.x/4.x | Qt 5/6 | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | - | Native fonts, notarization, engine install/repair, and science remain open. |
+| macOS | Apple Silicon | 3.44 target | Qt 5 | NOT TESTED | SOLVE ONLY | NOT TESTED | EXPERIMENTAL | 2026-10-04 | Installer enabled with native ARM bootstrap and Rosetta detection. All 287 Conda dependencies resolved for osx-arm64/macOS 11; bootstrap checksum and ARM64 Mach-O verified. Routing tests run on Linux. Actual Mac install, UI, repair, and science remain open. |
 | macOS | Intel | current 3.x/4.x | Qt 5/6 | NOT TESTED | NOT TESTED | NOT TESTED | NOT TESTED | - | Viability depends on current upstream package availability. |
-| Linux | x86_64 | current 3.x/4.x | Qt 5/6 | EXPERIMENTAL | NOT TESTED | NOT TESTED | EXPERIMENTAL | 2026-09-03 | QGIS-free tests pass; native QGIS and engine gates were unavailable. |
+| Linux | x86_64 | 3.44.7 | Qt 5.15.13 | PASS | PASS | PASS | SUPPORTED WITH LIMITATIONS | 2026-10-04 | beta.7 engine repair: real first install, dependency consistency, final-prefix imports, and QGIS Toolbox Normalize Heights followed by 2 m CHM passed on a 3,936,192-point EPSG:32605 cloud. Prior extracted-ZIP UI lifecycle checks passed. Other products and polygon/batch workflows are not qualified by this check. |
+| Linux | x86_64 | other 3.x/4.x | Qt 5/6 | NOT TESTED | NOT TESTED | NOT TESTED | EXPERIMENTAL | - | The 3.44.7 startup result does not qualify other QGIS versions. |
 | Linux | ARM64 | current | varies | EXPERIMENTAL | NOT TESTED | NOT TESTED | EXPERIMENTAL | 2026-09-03 | Platform mapping only. |
 | Linux Flatpak | any | any | varies | NOT TESTED | UNSUPPORTED | NOT TESTED | UNSUPPORTED | - | Sandbox filesystem and subprocess behavior need a dedicated design. |
 | BSD | any | any | varies | EXPERIMENTAL | UNSUPPORTED | NOT TESTED | UNSUPPORTED | - | Not a first-release target. |
@@ -53,22 +54,41 @@ QGIS release is supported.
 `backend_manifest.json` and `backend_specs/environment*.yml` are the authority.
 The current recipe owns Python 3.12, PyForestScan 0.4.x from PyPI, and the
 conda-forge scientific stack: PDAL and python-pdal, GDAL/libgdal, Rasterio,
-NumPy, SciPy, pandas, Shapely, pyproj, Fiona, GeoPandas, Matplotlib, tqdm, and
-pip. PyForestScan product execution and point-cloud I/O use managed PDAL;
+NumPy, SciPy, pandas, Shapely, pyproj, Fiona, GeoPandas, Matplotlib, tqdm,
+Requests, and pip. PyForestScan is pinned to 0.4.1; dependency bounds now match
+its published requirements, including NumPy >=2.3.1 and SciPy >=1.16.
+The installer runs `pip check` before accepting the environment.
+PyForestScan product execution and point-cloud I/O use managed PDAL;
 QGIS Processing PDAL algorithms are a separate optional toolbox surface.
 
-The platform YAML files are solve specifications, not lock files. Windows
-x86_64 is the only installer-qualified target. Micromamba is still selected as
-`latest` and the manifest SHA-256 entries are empty. Release support for any
-additional platform, and a production RC, require a fixed artifact version,
-archive SHA-256 values verified against the exact downloaded bytes, and
-platform-specific solved locks. The installer must fail closed when a release
-requires a checksum that is absent.
+The platform YAML files are solve specifications, not lock files. Installer
+execution is enabled for Windows and Linux x86_64, with experimental Apple
+Silicon support. Micromamba 2.9.0 is pinned
+to exact conda-forge archives and SHA-256 values in the manifest; the installer
+uses and verifies those values. POSIX activation clones the Conda environment
+into its final prefix, reinstalls pip packages there, and verifies the active
+environment before deleting staging. A production RC still needs solved locks
+and Windows repetition with the updated dependency recipe. The earlier Windows
+science evidence above predates this dependency repair.
 
 Phase 32Z attempted isolated Micromamba 2.8.1 dry-run solves for `win-64`,
 `linux-64`, `osx-arm64`, and `osx-64`. Resolution did not complete within the
 bounded test window and was stopped without creating an environment. This is
 an attempted test, not lock or engine-install evidence.
+
+On 2026-10-04, the updated recipe successfully resolved 287 packages for
+`osx-arm64` using Micromamba 2.9.0 with `CONDA_OVERRIDE_OSX=11.0` and a dry run.
+No Mac packages were installed or executed. The selected stack includes Python
+3.12, PDAL 2.10.0, python-pdal 3.5.3, GDAL 3.12.2, and Rasterio 1.5.0.
+The ARM bootstrap archive's SHA-256 and Mach-O CPU type were also verified.
+This is dependency-resolution evidence, not a claim that QGIS or the complete
+engine has run on macOS 11 or any other Mac version.
+
+Apple Silicon selection uses the native CPU, including when QGIS runs as Intel
+code under Rosetta. The process-local `sysctl.proc_translated` flag follows
+[Apple's documented detection method](https://developer.apple.com/documentation/apple-silicon/about-the-rosetta-translation-environment).
+The ARM scientific stack runs in separate subprocesses. Intel Mac installation
+remains disabled in ordinary beta builds.
 
 ## Process policy
 
@@ -93,10 +113,10 @@ CI should eventually cover Windows, Linux, and macOS against current LTR and
 stable QGIS where runners are practical. New QGIS releases trigger a Qt/API
 audit and package/engine/science smoke before support is declared.
 
-The supported release matrix is currently Windows QGIS 3.44.x only. QGIS 4.0
-is UI-COMPATIBLE, not fully supported. Expanding support requires real QGIS
-4.2, macOS Apple Silicon, and Linux runners or manual gates; QGIS-free unit
-tests alone do not promote a target to supported.
+Linux QGIS 3.44.7 has limited engine and real-data processing evidence described
+above. QGIS 4.0 is UI-COMPATIBLE, not fully supported. Expanding support requires
+real QGIS 4.2, macOS Apple Silicon, and additional Linux runners or manual gates;
+QGIS-free unit tests alone do not promote a target to supported.
 
 Sources: [QGIS Download](https://qgis.org/download/), [QGIS Installation
 Guide](https://qgis.org/resources/installation-guide/), and the [official

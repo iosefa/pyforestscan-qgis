@@ -31,6 +31,7 @@ class BackendRegistryTests(unittest.TestCase):
                 "geopandas",
                 "matplotlib",
                 "tqdm",
+                "requests",
                 "pyforestscan",
             },
             required_names,

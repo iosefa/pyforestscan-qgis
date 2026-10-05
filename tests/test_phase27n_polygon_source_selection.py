@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pyforestscan_qgis.core.batch import BatchProductSettings
 from pyforestscan_qgis.core.polygon_batch import PolygonBatchRequest, polygon_preflight_text, run_polygon_batch_preflight
@@ -76,7 +77,8 @@ class Phase27NPolygonSourceSelectionTests(unittest.TestCase):
         self.assertNotIn("110008858527", text)
         self.assertFalse(any("Large polygon batch: estimated point count" in warning for warning in report.warnings))
 
-    def test_crs_mismatch_blocks_unsafe_extent_comparison(self) -> None:
+    @patch("pyforestscan_qgis.core.crs_alignment.default_transformer_factory", side_effect=ValueError("No CRS transformer available"))
+    def test_unavailable_crs_transform_blocks_unsafe_extent_comparison(self, _transformer) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "ept"
             write_ept(root / "ept.json", crs="EPSG:32610")

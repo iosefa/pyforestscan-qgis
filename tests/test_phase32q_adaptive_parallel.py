@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from pyforestscan_qgis.core.adaptive_concurrency import (
     AdaptiveConcurrencyController,
@@ -59,7 +60,8 @@ class AdaptiveConcurrencyTests(unittest.TestCase):
         process.terminate = lambda: setattr(process, "terminated", True)
         registry = OwnedWorkerRegistry()
         registry.register("worker", process)
-        registry.terminate_all()
+        with patch("pyforestscan_qgis.core.owned_workers.terminate_process_tree", side_effect=lambda child: child.terminate()):
+            registry.terminate_all()
         self.assertTrue(process.terminated)
         self.assertEqual(registry.snapshots()[0].worker_id, "worker")
 

@@ -34,14 +34,17 @@ class DependencyContract:
 ALL_PRODUCTS = ("chm", "rumple", "pad", "pad_derivative", "pai", "fhd", "canopy_cover", "dtm", "point_density", "voxel_stat", "normalize_hag", "point_cloud_preprocess")
 PROCESSING_ENGINE_DEPENDENCIES = (
     DependencyContract("PyForestScan", "pyforestscan", "==0.4.1", ALL_PRODUCTS),
-    DependencyContract("PDAL Python", "pdal", ">=3.4,<4", ALL_PRODUCTS),
-    DependencyContract("Rasterio", "rasterio", ">=1.4,<1.5", ALL_PRODUCTS),
-    DependencyContract("NumPy", "numpy", ">=1.26,<2", ALL_PRODUCTS),
-    DependencyContract("GDAL", "osgeo.gdal", ">=3.9,<3.10", ALL_PRODUCTS),
-    DependencyContract("SciPy", "scipy", ">=1.14,<2", ALL_PRODUCTS),
-    DependencyContract("Shapely", "shapely", ">=2,<3", ALL_PRODUCTS),
-    DependencyContract("PyProj", "pyproj", ">=3.7,<4", ALL_PRODUCTS),
-    DependencyContract("pandas", "pandas", ">=2,<3", ("rumple", "pad", "pai", "fhd")),
+    DependencyContract("PDAL Python", "pdal", ">=3.4.5,<4", ALL_PRODUCTS),
+    DependencyContract("Rasterio", "rasterio", ">=1.4,<2", ALL_PRODUCTS),
+    DependencyContract("NumPy", "numpy", ">=2.3.1,<3", ALL_PRODUCTS),
+    DependencyContract("GDAL", "osgeo.gdal", ">=3.9,<4", ALL_PRODUCTS),
+    DependencyContract("SciPy", "scipy", ">=1.16,<2", ALL_PRODUCTS),
+    DependencyContract("Shapely", "shapely", ">=2.1.1,<3", ALL_PRODUCTS),
+    DependencyContract("PyProj", "pyproj", ">=3.7.1,<4", ALL_PRODUCTS),
+    DependencyContract("pandas", "pandas", ">=2.3,<3", ALL_PRODUCTS),
+    DependencyContract("GeoPandas", "geopandas", ">=1.1.1,<2", ALL_PRODUCTS),
+    DependencyContract("Matplotlib", "matplotlib", ">=3.10.3,<4", ALL_PRODUCTS),
+    DependencyContract("Requests", "requests", ">=2.32.4,<3", ALL_PRODUCTS),
 )
 
 PRODUCT_CAPABILITIES = {

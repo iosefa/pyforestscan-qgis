@@ -60,7 +60,7 @@ class AdapterCanopyCoverTests(unittest.TestCase):
             {"pyforestscan": fake_pyforestscan, "pyforestscan.handlers": fake_handlers},
         ):
             output_path = Path(temp_dir) / "canopy_cover.tif"
-            result = PyForestScanAdapter().create_canopy_cover(
+            result = PyForestScanAdapter(execution_mode="qgis_python").create_canopy_cover(
                 CanopyCoverRequest(
                     input_path="plot.laz",
                     output_path=output_path,
@@ -91,7 +91,7 @@ class AdapterCanopyCoverTests(unittest.TestCase):
             sys.modules,
             {"pyforestscan": fake_pyforestscan, "pyforestscan.handlers": fake_handlers},
         ):
-            adapter = PyForestScanAdapter()
+            adapter = PyForestScanAdapter(execution_mode="qgis_python")
             with self.assertRaises(ProcessingError):
                 adapter.create_canopy_cover(CanopyCoverRequest("plot.laz", Path(temp_dir) / "cover.tif", 1.0, 2.0, "EPSG:32610"))
             self.assertEqual(ProgressState.FAILED, adapter.get_progress().state)
@@ -100,7 +100,7 @@ class AdapterCanopyCoverTests(unittest.TestCase):
         """Negative canopy height thresholds are rejected before processing."""
         with tempfile.TemporaryDirectory() as temp_dir:
             with self.assertRaises(ProcessingError):
-                PyForestScanAdapter().create_canopy_cover(
+                PyForestScanAdapter(execution_mode="qgis_python").create_canopy_cover(
                     CanopyCoverRequest("plot.laz", Path(temp_dir) / "cover.tif", 1.0, -1.0, "EPSG:32610")
                 )
 

@@ -199,7 +199,7 @@ class BackendTransactionTests(unittest.TestCase):
         from pyforestscan_qgis.core.backend.installer import BackendInstaller
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            paths = resolve_backend_paths(backend_root=Path(tmpdir) / "backend", platform=BackendPlatform.LINUX)
+            paths = resolve_backend_paths(backend_root=Path(tmpdir) / "backend", platform=BackendPlatform.MACOS, machine="x86_64")
             result = BackendInstaller(paths, environ={}).install_backend()
 
         self.assertFalse(result.success)

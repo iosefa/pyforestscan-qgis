@@ -25,7 +25,7 @@ class AdapterFhdRumpleTests(unittest.TestCase):
     def test_create_fhd_writes_geotiff(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir, _fake_science_modules() as state:
             output = Path(temp_dir) / "fhd.tif"
-            adapter = PyForestScanAdapter()
+            adapter = PyForestScanAdapter(execution_mode="qgis_python")
 
             result = adapter.create_fhd(
                 FhdRequest(
@@ -45,7 +45,7 @@ class AdapterFhdRumpleTests(unittest.TestCase):
     def test_create_rumple_writes_scalar_csv(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir, _fake_science_modules() as state:
             output = Path(temp_dir) / "rumple_summary.csv"
-            adapter = PyForestScanAdapter()
+            adapter = PyForestScanAdapter(execution_mode="qgis_python")
 
             result = adapter.create_rumple(
                 RumpleRequest(
@@ -66,7 +66,7 @@ class AdapterFhdRumpleTests(unittest.TestCase):
             self.assertIn("grid_resolution,1", text)
 
     def test_create_rumple_rejects_geotiff_output(self) -> None:
-        adapter = PyForestScanAdapter()
+        adapter = PyForestScanAdapter(execution_mode="qgis_python")
 
         with self.assertRaises(ProcessingError):
             adapter.create_rumple(

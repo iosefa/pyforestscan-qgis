@@ -322,7 +322,7 @@ class MissionControlUxTests(unittest.TestCase):
         self.assertIn('QPushButton("Clear Current Run")', source)
         self.assertIn("Execution backend: PBM when READY", source)
         self.assertIn("Plugin ZIP: ready for QGIS Plugin Manager installs", source)
-        self.assertIn("Backend installer: available on Windows beta builds", source)
+        self.assertIn("Backend installer: Windows and Linux x86_64; Apple Silicon experimental", source)
         self.assertIn("def set_workflow_indicator", source)
         self.assertIn("def set_next_step", source)
         self.assertNotIn('setObjectName("workflowStepIndicator")', source)

@@ -26,7 +26,7 @@ class TestPyForestScanAdapterValidation(unittest.TestCase):
     """Dataset validation tests that do not require QGIS."""
 
     def test_missing_dataset_returns_invalid_result(self) -> None:
-        adapter = PyForestScanAdapter()
+        adapter = PyForestScanAdapter(execution_mode="qgis_python")
 
         result = adapter.validate_dataset("missing.las")
 
@@ -38,7 +38,7 @@ class TestPyForestScanAdapterValidation(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "points.txt"
             path.write_text("not lidar", encoding="utf-8")
-            adapter = PyForestScanAdapter()
+            adapter = PyForestScanAdapter(execution_mode="qgis_python")
 
             result = adapter.validate_dataset(path)
 
@@ -50,7 +50,7 @@ class TestPyForestScanAdapterValidation(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "tile.copc.laz"
             path.write_bytes(b"")
-            adapter = PyForestScanAdapter()
+            adapter = PyForestScanAdapter(execution_mode="qgis_python")
 
             source = adapter.open_dataset(path)
 
@@ -58,7 +58,7 @@ class TestPyForestScanAdapterValidation(unittest.TestCase):
         self.assertFalse(source.is_remote)
 
     def test_remote_non_ept_is_invalid(self) -> None:
-        adapter = PyForestScanAdapter()
+        adapter = PyForestScanAdapter(execution_mode="qgis_python")
 
         result = adapter.validate_dataset("https://example.test/data.laz")
 
@@ -84,7 +84,7 @@ class TestPyForestScanAdapterInspection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             ept = Path(directory) / "ept.json"
             ept.write_text(json.dumps(metadata), encoding="utf-8")
-            adapter = PyForestScanAdapter()
+            adapter = PyForestScanAdapter(execution_mode="qgis_python")
 
             inspection = adapter.inspect_dataset(ept)
 
@@ -109,7 +109,7 @@ class TestPyForestScanAdapterInspection(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             ept = Path(directory) / "ept.json"
             ept.write_text(json.dumps(metadata), encoding="utf-8")
-            adapter = PyForestScanAdapter()
+            adapter = PyForestScanAdapter(execution_mode="qgis_python")
 
             inspection = adapter.inspect_dataset(
                 ept,
@@ -157,7 +157,7 @@ class TestPyForestScanAdapterInspection(unittest.TestCase):
                     return len(array)
 
             fake_pdal = types.SimpleNamespace(Pipeline=FakePipeline)
-            adapter = PyForestScanAdapter()
+            adapter = PyForestScanAdapter(execution_mode="qgis_python")
 
             with patch.dict(sys.modules, {"pdal": fake_pdal}):
                 inspection = adapter.inspect_dataset(las)
@@ -171,7 +171,7 @@ class TestPyForestScanAdapterInspection(unittest.TestCase):
         self.assertAlmostEqual(inspection.estimated_density, 1.0)
 
     def test_inspect_without_open_dataset_raises_dataset_error(self) -> None:
-        adapter = PyForestScanAdapter()
+        adapter = PyForestScanAdapter(execution_mode="qgis_python")
 
         with self.assertRaises(DatasetError):
             adapter.inspect_dataset()
@@ -181,7 +181,7 @@ class TestPyForestScanAdapterControlSurface(unittest.TestCase):
     """Control and placeholder behavior for future processing methods."""
 
     def test_compute_products_is_explicitly_not_implemented(self) -> None:
-        adapter = PyForestScanAdapter()
+        adapter = PyForestScanAdapter(execution_mode="qgis_python")
         request = ProductRequest(products=(ProductType.CHM,))
 
         with self.assertRaises(NotImplementedError):

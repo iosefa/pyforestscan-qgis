@@ -74,9 +74,20 @@ def terminate_process_tree(process, os_name: str | None = None) -> None:
             process.terminate()
             return
     try:
-        os.killpg(os.getpgid(int(process.pid)), signal.SIGTERM)
-    except (AttributeError, OSError, ProcessLookupError):
+        pid = int(process.pid)
+        group = os.getpgid(pid)
+        # Only a child launched in its own group owns that group. Ordinary
+        # children inherit QGIS's (or the coordinator's) group, so signalling
+        # that group would also terminate the application and sibling jobs.
+        if group == pid and group != os.getpgrp():
+            os.killpg(group, signal.SIGTERM)
+            return
+    except (AttributeError, OSError):
+        pass
+    try:
         process.terminate()
+    except ProcessLookupError:
+        pass  # The worker can exit between poll() and termination.
 
 
 class GlobalWorkerLease:

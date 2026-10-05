@@ -28,10 +28,10 @@ class BackendInstallPlanTests(unittest.TestCase):
         self.assertEqual(plan.environment_path, paths.environment_path)
         self.assertEqual(
             plan.required_package_names(),
-            ("python", "pdal", "python-pdal", "gdal", "rasterio", "numpy", "scipy", "pandas", "shapely", "pyproj", "fiona", "geopandas", "matplotlib", "tqdm", "pyforestscan"),
+            ("python", "pdal", "python-pdal", "gdal", "rasterio", "numpy", "scipy", "pandas", "shapely", "pyproj", "fiona", "geopandas", "matplotlib", "tqdm", "requests", "pyforestscan"),
         )
         self.assertIn("conda-forge", [channel.name for channel in plan.channels])
-        self.assertTrue(any("planned/experimental" in warning.lower() for warning in plan.warnings))
+        self.assertTrue(any("linux internal beta" in warning.lower() for warning in plan.warnings))
 
     def test_environment_spec_uses_dependency_registry(self) -> None:
         registry = default_backend_registry()
@@ -67,7 +67,7 @@ class BackendInstallPlanTests(unittest.TestCase):
 
         self.assertEqual(before, after)
         self.assertIn("Install Plan Preview", text)
-        self.assertIn("Windows internal beta builds can execute this plan", text)
+        self.assertIn("Windows and Linux x86_64 beta builds can execute this plan", text)
 
     def test_format_install_plan_lists_verification_and_rollback(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

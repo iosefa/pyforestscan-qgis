@@ -14,9 +14,10 @@ from .checksums import ChecksumResult, verify_checksum
 from .config import planned_backend_config, save_backend_config, utc_now_iso
 from .downloads import DownloadResult, Downloader, download_file
 from .logging import write_backend_log_entry
+from .manifest import platform_subdir
 from .micromamba import MicromambaBootstrapPolicy, micromamba_bootstrap_policy
 from .models import BackendOperationResult, BackendPlatform, BackendRegistry, BackendStatus, BackendVerificationResult
-from .paths import BackendPaths, resolve_backend_paths
+from .paths import BackendPaths, backend_architecture, resolve_backend_paths
 from .process_env import backend_pip_install_command, build_clean_subprocess_env, clean_env_summary, conda_environment_path_entries, hidden_subprocess_kwargs, summarize_subprocess_output
 from .registry import default_backend_registry
 from .verification import verify_backend
@@ -55,6 +56,7 @@ class StagingPaths:
 def backend_install_availability(
     environ: dict[str, str] | None = None,
     platform: BackendPlatform | None = None,
+    machine: str | None = None,
 ) -> BackendInstallAvailability:
     """Return whether real installer execution is available for this build/platform."""
     env = environ if environ is not None else os.environ
@@ -69,7 +71,10 @@ def backend_install_availability(
         build_allows = False
         beta_platforms = ()
 
-    supported = platform_value is BackendPlatform.WINDOWS
+    architecture = backend_architecture(platform_value, machine)
+    supported = (
+        platform_value in (BackendPlatform.WINDOWS, BackendPlatform.LINUX) and architecture == "x86_64"
+    ) or (platform_value is BackendPlatform.MACOS and architecture == "arm64")
     if developer_override:
         return BackendInstallAvailability(
             enabled=platform_value is not BackendPlatform.UNKNOWN,
@@ -97,11 +102,13 @@ def backend_install_availability(
             platform=platform_value,
             build_allows_install=True,
             developer_override=False,
-            reason="Windows internal beta backend installation is enabled.",
+            reason=("Apple Silicon experimental backend installation is enabled; native Mac validation is pending."
+                    if platform_value is BackendPlatform.MACOS else
+                    f"{platform_value.value.title()} internal beta backend installation is enabled."),
             button_label="Install Backend",
         )
     if platform_value in (BackendPlatform.LINUX, BackendPlatform.MACOS):
-        reason = "Backend installation is planned/experimental on Linux and macOS until platform smoke testing is complete."
+        reason = "Backend installation is planned/experimental on this platform or architecture until platform smoke testing is complete."
     else:
         reason = "Backend installation is unavailable for this platform."
     return BackendInstallAvailability(
@@ -115,14 +122,14 @@ def backend_install_availability(
     )
 
 
-def backend_install_enabled(environ: dict[str, str] | None = None, platform: BackendPlatform | None = None) -> bool:
+def backend_install_enabled(environ: dict[str, str] | None = None, platform: BackendPlatform | None = None, machine: str | None = None) -> bool:
     """Return whether real installer actions are enabled."""
-    return backend_install_availability(environ=environ, platform=platform).enabled
+    return backend_install_availability(environ=environ, platform=platform, machine=machine).enabled
 
 
-def install_disabled_result(operation: str, platform: BackendPlatform | None = None, environ: dict[str, str] | None = None) -> BackendOperationResult:
+def install_disabled_result(operation: str, platform: BackendPlatform | None = None, environ: dict[str, str] | None = None, machine: str | None = None) -> BackendOperationResult:
     """Return the standard refusal result when installer execution is unavailable."""
-    availability = backend_install_availability(environ=environ, platform=platform)
+    availability = backend_install_availability(environ=environ, platform=platform, machine=machine)
     return BackendOperationResult(
         operation=operation,
         status=BackendStatus.NOT_INSTALLED,
@@ -150,6 +157,7 @@ def staged_backend_paths(paths: BackendPaths) -> BackendPaths:
     staged = staging_paths(paths)
     return BackendPaths(
         platform=paths.platform,
+        architecture=paths.architecture,
         backend_root=staged.root,
         micromamba_executable=staged.micromamba_executable,
         environment_path=staged.environment_path,
@@ -191,7 +199,7 @@ class BackendInstaller:
 
     def install_availability(self) -> BackendInstallAvailability:
         """Return real installer availability for this installer instance."""
-        return backend_install_availability(self.environ, self.paths.platform)
+        return backend_install_availability(self.environ, self.paths.platform, self.paths.architecture or None)
 
     def enabled(self) -> bool:
         """Return whether real installer actions are enabled."""
@@ -201,13 +209,13 @@ class BackendInstaller:
         """Return a refusal result when installer execution is unavailable."""
         if self.enabled():
             return None
-        return install_disabled_result(operation, self.paths.platform, self.environ)
+        return install_disabled_result(operation, self.paths.platform, self.environ, self.paths.architecture or None)
 
     def plan_install(self) -> BackendOperationResult:
         """Return installer readiness without modifying the filesystem."""
         availability = self.install_availability()
         if not availability.enabled:
-            return install_disabled_result("plan_install", self.paths.platform, self.environ)
+            return install_disabled_result("plan_install", self.paths.platform, self.environ, self.paths.architecture or None)
         return BackendOperationResult(
             operation="plan_install",
             status=BackendStatus.NOT_INSTALLED,
@@ -275,7 +283,9 @@ class BackendInstaller:
             return disabled
         staged = staging_paths(self.paths)
         spec = spec_file or default_environment_spec_file(self.paths.platform)
-        command = [str(staged.micromamba_executable), "create", "-y", "-p", str(staged.environment_path), "-f", str(spec)]
+        command = [str(staged.micromamba_executable), "create", "-y", "--no-rc",
+                   "--platform", platform_subdir(self.paths.platform, self.paths.architecture or None),
+                   "-p", str(staged.environment_path), "-f", str(spec)]
         try:
             completed = self._run_subprocess(command, command_kind="micromamba_create", prepend_paths=(staged.micromamba_executable.parent,))
         except Exception as exc:  # noqa: BLE001 - installer reports failures.
@@ -285,12 +295,12 @@ class BackendInstaller:
             return BackendOperationResult("create_environment", BackendStatus.FAILED, False, f"Environment creation failed: {output}", True)
         return BackendOperationResult("create_environment", BackendStatus.INSTALLING, True, f"Created staged backend environment at {staged.environment_path}.", True)
 
-    def install_python_packages(self) -> BackendOperationResult:
-        """Install PyPI-only manifest packages with staged backend Python."""
+    def install_python_packages(self, *, paths: BackendPaths | None = None) -> BackendOperationResult:
+        """Install and check PyPI packages using the selected backend Python."""
         disabled = self.require_enabled("install_python_packages")
         if disabled:
             return disabled
-        staged = staging_paths(self.paths)
+        staged = paths or staged_backend_paths(self.paths)
         packages = self.pip_packages()
         if not packages:
             return BackendOperationResult("install_python_packages", BackendStatus.INSTALLING, True, "No PyPI-only backend packages are required.", False)
@@ -302,6 +312,14 @@ class BackendInstaller:
         if completed.returncode != 0:
             output = summarize_subprocess_output(completed.stderr, completed.stdout) or "No subprocess output."
             return BackendOperationResult("install_python_packages", BackendStatus.FAILED, False, f"Backend Python package install failed: {output}", True)
+        checked = self._run_subprocess(
+            [str(staged.python_executable), "-m", "pip", "check"],
+            command_kind="backend_python_pip_check",
+            prepend_paths=conda_environment_path_entries(staged.environment_path, self.paths.platform.value),
+        )
+        if checked.returncode != 0:
+            output = summarize_subprocess_output(checked.stderr, checked.stdout)
+            return BackendOperationResult("install_python_packages", BackendStatus.FAILED, False, f"Backend dependency requirements are not satisfied: {output}", True)
         return BackendOperationResult("install_python_packages", BackendStatus.INSTALLING, True, f"Installed PyPI-only backend packages with {staged.python_executable}.", True)
 
     def pip_packages(self) -> list[str]:
@@ -362,7 +380,24 @@ class BackendInstaller:
             _backup_active_backend(self.paths, backup_root)
             self.paths.micromamba_executable.parent.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(staged.micromamba_dir), str(self.paths.micromamba_executable.parent))
-            shutil.move(str(staged.environment_path), str(self.paths.environment_path))
+            if self.paths.platform is BackendPlatform.WINDOWS:
+                shutil.move(str(staged.environment_path), str(self.paths.environment_path))
+            else:
+                # Conda prefixes contain absolute paths in scripts and native
+                # libraries. A filesystem move leaves references to staging.
+                completed = self._run_subprocess(
+                    [str(self.paths.micromamba_executable), "create", "-y", "--offline", "--no-rc",
+                     "--platform", platform_subdir(self.paths.platform, self.paths.architecture or None),
+                     "-p", str(self.paths.environment_path), "--clone", str(staged.environment_path)],
+                    command_kind="micromamba_promote",
+                )
+                if completed.returncode != 0:
+                    raise OSError(summarize_subprocess_output(completed.stderr, completed.stdout))
+                # Micromamba clones Conda-managed files, not pip-installed
+                # packages. Install those into the final prefix explicitly.
+                packages = self.install_python_packages(paths=self.paths)
+                if not packages.success:
+                    raise OSError(packages.message)
         except OSError as exc:
             _restore_promotion_backup(self.paths, backup_root)
             return BackendOperationResult("promote_staging", BackendStatus.FAILED, False, f"Promotion failed and previous backend was restored when available: {exc}", True)
@@ -435,7 +470,14 @@ class BackendInstaller:
 
     def _run_subprocess(self, command: list[str], command_kind: str, prepend_paths: tuple[Path, ...] = ()) -> subprocess.CompletedProcess[str]:
         """Run an installer subprocess with a sanitized PBM environment."""
-        env = build_clean_subprocess_env(self.environ, prepend_paths=prepend_paths)
+        env = build_clean_subprocess_env(
+            self.environ, prepend_paths=prepend_paths,
+            extra_env={
+                "MAMBA_ROOT_PREFIX": str(self.paths.cache_dir / "mamba"),
+                "MAMBA_DOWNLOAD_THREADS": "2",
+                "MAMBA_EXTRACT_THREADS": "2",
+            },
+        )
         details = clean_env_summary(command_kind, command[0])
         write_backend_log_entry(self.paths.install_log, "install", "Running PBM installer subprocess with sanitized environment.", stage=command_kind.upper(), details=details)
         completed = self.runner(command, check=False, capture_output=True, text=True, timeout=1800, env=env, **hidden_subprocess_kwargs())
@@ -509,6 +551,10 @@ def _restore_promotion_backup(paths: BackendPaths, backup_root: Path) -> bool:
         paths.config_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(config_backup), str(paths.config_file))
         restored = True
+    # A transaction may request rollback again after promote_staging restored
+    # the previous environment. Do not leave an empty backup that would cause
+    # that second rollback to delete the restored environment.
+    shutil.rmtree(backup_root)
     return restored
 
 

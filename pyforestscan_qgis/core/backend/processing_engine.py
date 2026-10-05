@@ -546,7 +546,12 @@ class ProcessingEngineService:
         if self.setup_callback is None:
             raise ProcessingEngineError("ENGINE_SETUP_REQUIRED", "Processing Engine setup is not available.")
         with ProcessingEngineSetupLock(self.paths):
-            self.setup_callback(progress_callback=progress_callback)
+            result = self.setup_callback(progress_callback=progress_callback)
+            if getattr(result, "success", True) is False:
+                raise ProcessingEngineError(
+                    "ENGINE_SETUP_FAILED", result.message,
+                    str(getattr(result, "log_path", "") or ""),
+                )
             final = self.verifier.verify(require_setup_marker=True, setup_completed=True)
             state = self._publish(final)
             if not state.ready_for_processing:

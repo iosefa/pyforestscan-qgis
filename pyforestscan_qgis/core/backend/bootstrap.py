@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .models import BackendPlatform
+from .manifest import BackendManifestError
+from .micromamba import micromamba_archive_name, micromamba_bootstrap_policy
 from .paths import BackendPaths
 
 
@@ -24,8 +26,14 @@ class MicromambaBootstrapPlan:
 
 def build_micromamba_bootstrap_plan(paths: BackendPaths) -> MicromambaBootstrapPlan:
     """Return the planned micromamba bootstrap layout without downloading anything."""
-    artifact = _artifact_name(paths.platform)
     warnings: list[str] = []
+    artifact = micromamba_archive_name(paths.platform, paths.architecture or None)
+    try:
+        policy = micromamba_bootstrap_policy(paths)
+        source_note = f"Pinned Micromamba source: {policy.source_url}"
+    except BackendManifestError as exc:
+        warnings.append(str(exc))
+        source_note = "Bootstrap source unavailable until the backend manifest is repaired."
     if paths.platform is BackendPlatform.UNKNOWN:
         warnings.append("Host platform is unknown; micromamba artifact selection must be resolved before installation is enabled.")
     return MicromambaBootstrapPlan(
@@ -33,7 +41,7 @@ def build_micromamba_bootstrap_plan(paths: BackendPaths) -> MicromambaBootstrapP
         target_executable=paths.micromamba_executable,
         download_cache_path=paths.downloads_dir / artifact,
         artifact_name=artifact,
-        source_note="Installer preview uses a pinned micromamba bootstrap source strategy; real download requires the Phase 22C developer guard.",
+        source_note=source_note,
         verification_steps=(
             "Verify downloaded artifact checksum before extraction.",
             "Verify micromamba executable exists at the user-local backend path.",
@@ -41,13 +49,3 @@ def build_micromamba_bootstrap_plan(paths: BackendPaths) -> MicromambaBootstrapP
         ),
         warnings=tuple(warnings),
     )
-
-
-def _artifact_name(platform: BackendPlatform) -> str:
-    if platform is BackendPlatform.WINDOWS:
-        return "micromamba-win-64-placeholder.tar.bz2"
-    if platform is BackendPlatform.MACOS:
-        return "micromamba-osx-64-or-arm64-placeholder.tar.bz2"
-    if platform is BackendPlatform.LINUX:
-        return "micromamba-linux-64-placeholder.tar.bz2"
-    return "micromamba-unknown-platform-placeholder.tar.bz2"

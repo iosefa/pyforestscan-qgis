@@ -7,6 +7,7 @@ import platform as platform_module
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..platform_compat import native_architecture
 from .models import BackendPlatform
 
 
@@ -32,6 +33,13 @@ class BackendPaths:
     repair_log: Path
     update_log: Path
     remove_log: Path
+    architecture: str = ""
+
+
+def backend_architecture(platform: BackendPlatform, machine: str | None = None) -> str:
+    """Resolve the native engine target independently of QGIS's CPU type."""
+    system = "Darwin" if platform is BackendPlatform.MACOS else platform.value
+    return native_architecture(system, machine)
 
 
 def detect_backend_platform(system_name: str | None = None) -> BackendPlatform:
@@ -69,6 +77,7 @@ def resolve_backend_paths(
     platform: BackendPlatform | None = None,
     environ: dict[str, str] | None = None,
     home: Path | None = None,
+    machine: str | None = None,
 ) -> BackendPaths:
     """Return all backend paths for the current or mocked platform."""
     platform_value = platform or detect_backend_platform()
@@ -84,6 +93,7 @@ def resolve_backend_paths(
     scripts_dir = root / "scripts"
     return BackendPaths(
         platform=platform_value,
+        architecture=backend_architecture(platform_value, machine),
         backend_root=root,
         micromamba_executable=micromamba,
         environment_path=environment,

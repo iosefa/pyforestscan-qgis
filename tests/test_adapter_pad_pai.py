@@ -27,7 +27,7 @@ class AdapterPadPaiTests(unittest.TestCase):
         """PAD calls assign_voxels/calculate_pad and writes one raster band per height bin."""
         with tempfile.TemporaryDirectory() as temp_dir, _fake_science_modules() as state:
             output = Path(temp_dir) / "pad.tif"
-            adapter = PyForestScanAdapter()
+            adapter = PyForestScanAdapter(execution_mode="qgis_python")
 
             result = adapter.create_pad(
                 PadRequest(
@@ -49,7 +49,7 @@ class AdapterPadPaiTests(unittest.TestCase):
         """PAI computes PAD internally and delegates 2D GeoTIFF writing to PyForestScan."""
         with tempfile.TemporaryDirectory() as temp_dir, _fake_science_modules() as state:
             output = Path(temp_dir) / "pai.tif"
-            adapter = PyForestScanAdapter()
+            adapter = PyForestScanAdapter(execution_mode="qgis_python")
 
             result = adapter.create_pai(
                 PaiRequest(
@@ -71,7 +71,7 @@ class AdapterPadPaiTests(unittest.TestCase):
 
     def test_create_pai_requires_positive_voxel_height(self) -> None:
         """PAI rejects invalid height bins before importing PyForestScan."""
-        adapter = PyForestScanAdapter()
+        adapter = PyForestScanAdapter(execution_mode="qgis_python")
 
         with self.assertRaises(ProcessingError):
             adapter.create_pai(

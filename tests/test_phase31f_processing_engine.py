@@ -3,14 +3,16 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
-from pyforestscan_qgis.core.backend.models import BackendPlatform
+from pyforestscan_qgis.core.backend.models import BackendPlatform, BackendOperationResult, BackendStatus
 from pyforestscan_qgis.core.backend.paths import resolve_backend_paths
 from pyforestscan_qgis.core.backend.processing_engine import (
     ProcessingEngineError,
     ProcessingEngineState,
     ProcessingEngineSetupLock,
     ProcessingEngineVerifier,
+    ProcessingEngineService,
     REQUIRED_PYFORESTSCAN_MODULES,
     current_plugin_build_id,
     current_runner_hash,
@@ -18,6 +20,15 @@ from pyforestscan_qgis.core.backend.processing_engine import (
 
 
 class ProcessingEngineTests(unittest.TestCase):
+    def test_setup_preserves_the_actual_installer_failure(self):
+        with tempfile.TemporaryDirectory() as folder:
+            paths = resolve_backend_paths(Path(folder), BackendPlatform.LINUX)
+            service = ProcessingEngineService(paths, setup_callback=Mock(return_value=
+                BackendOperationResult("install", BackendStatus.FAILED, False, "Dependency solve failed: conflicting numpy requirements", False)))
+            with self.assertRaisesRegex(ProcessingEngineError, "conflicting numpy requirements") as raised:
+                service.ensure_processing_engine_ready()
+            self.assertEqual(raised.exception.code, "ENGINE_SETUP_FAILED")
+
     def _paths(self, root):
         paths = resolve_backend_paths(Path(root), BackendPlatform.WINDOWS)
         paths.python_executable.parent.mkdir(parents=True)

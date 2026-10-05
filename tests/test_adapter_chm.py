@@ -50,7 +50,7 @@ class AdapterChmTests(unittest.TestCase):
             {"pyforestscan": fake_pyforestscan, "pyforestscan.handlers": fake_handlers},
         ):
             output_path = Path(temp_dir) / "chm.tif"
-            result = PyForestScanAdapter().create_chm(
+            result = PyForestScanAdapter(execution_mode="qgis_python").create_chm(
                 ChmRequest(
                     input_path="plot.laz",
                     output_path=output_path,
@@ -82,7 +82,7 @@ class AdapterChmTests(unittest.TestCase):
             sys.modules,
             {"pyforestscan": fake_pyforestscan, "pyforestscan.handlers": fake_handlers},
         ):
-            adapter = PyForestScanAdapter()
+            adapter = PyForestScanAdapter(execution_mode="qgis_python")
             with self.assertRaises(ProcessingError):
                 adapter.create_chm(ChmRequest("plot.laz", Path(temp_dir) / "chm.tif", 1.0, "EPSG:32610"))
             self.assertEqual(ProgressState.FAILED, adapter.get_progress().state)
@@ -91,7 +91,7 @@ class AdapterChmTests(unittest.TestCase):
         """Invalid CHM output extensions are rejected before processing."""
         with tempfile.TemporaryDirectory() as temp_dir:
             with self.assertRaises(ProcessingError):
-                PyForestScanAdapter().create_chm(ChmRequest("plot.laz", Path(temp_dir) / "chm.asc", 1.0, "EPSG:32610"))
+                PyForestScanAdapter(execution_mode="qgis_python").create_chm(ChmRequest("plot.laz", Path(temp_dir) / "chm.asc", 1.0, "EPSG:32610"))
 
     def test_create_chm_requires_hag_dimension(self) -> None:
         """Missing HeightAboveGround is reported as a processing error."""
@@ -105,7 +105,7 @@ class AdapterChmTests(unittest.TestCase):
             sys.modules,
             {"pyforestscan": fake_pyforestscan, "pyforestscan.handlers": fake_handlers},
         ):
-            adapter = PyForestScanAdapter()
+            adapter = PyForestScanAdapter(execution_mode="qgis_python")
             with self.assertRaises(ProcessingError):
                 adapter.create_chm(ChmRequest("plot.laz", Path(temp_dir) / "chm.tif", 1.0, "EPSG:32610"))
             self.assertEqual(ProgressState.FAILED, adapter.get_progress().state)

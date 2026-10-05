@@ -8,6 +8,7 @@ import struct
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from pyforestscan_qgis.core.batch import BatchItemResult, BatchProductSettings, BatchResult
 from pyforestscan_qgis.core.batch_options import BatchExecutionOptions, PolygonBatchOptions
@@ -34,6 +35,19 @@ def write_las_header(path: Path, *, bounds=(0.0, 10.0, 0.0, 10.0, 0.0, 1.0), poi
 
 
 class PolygonStabilizationTests(unittest.TestCase):
+    def test_header_discovery_order_is_independent_of_filesystem_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            paths = [root / name for name in ("b.las", "a.las")]
+            for path in paths:
+                write_las_header(path)
+            with patch("pyforestscan_qgis.core.lidar_source_metadata.iter_lidar_paths", return_value=iter(paths)):
+                forward = HeaderMetadataService().discover(root)
+            with patch("pyforestscan_qgis.core.lidar_source_metadata.iter_lidar_paths", return_value=iter(reversed(paths))):
+                reverse = HeaderMetadataService().discover(root)
+        self.assertEqual(forward, reverse)
+        self.assertEqual(tuple(item.path.name for item in forward), ("a.las", "b.las"))
+
     def test_shared_header_metadata_model_records_scaled_bounds_and_override(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

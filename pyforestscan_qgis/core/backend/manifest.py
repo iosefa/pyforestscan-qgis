@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..platform_compat import conda_platform_subdir
 from .models import BackendDependency, BackendPlatform, BackendRegistry
 
 
@@ -47,9 +48,12 @@ class ManifestArtifact:
     sources: tuple[ManifestSource, ...]
     future_mirrors: tuple[str, ...] = ()
 
-    def sha256_for(self, platform: BackendPlatform) -> str | None:
-        """Return the platform SHA-256 value, if pinned."""
-        value = self.hashes.get(platform.value, "")
+    def sha256_for(self, platform: BackendPlatform, machine: str | None = None) -> str | None:
+        """Select an architecture hash; legacy OS-only hashes mean x86_64."""
+        subdir = platform_subdir(platform, machine)
+        value = self.hashes.get(subdir, "")
+        if not value and subdir in {"win-64", "linux-64", "osx-64"}:
+            value = self.hashes.get(platform.value, "")
         return value or None
 
     def sha256_for_platforms_present(self) -> bool:
@@ -123,16 +127,10 @@ class BackendManifest:
             raise BackendManifestError("Manifest is missing the micromamba artifact.") from exc
 
 
-_PLATFORM_SUBDIRS = {
-    BackendPlatform.WINDOWS: "win-64",
-    BackendPlatform.LINUX: "linux-64",
-    BackendPlatform.MACOS: "osx-64",
-}
-
-
-def platform_subdir(platform: BackendPlatform) -> str:
+def platform_subdir(platform: BackendPlatform, machine: str | None = None) -> str:
     """Return the manifest platform subdir used by download source templates."""
-    return _PLATFORM_SUBDIRS.get(platform, "")
+    system = "Darwin" if platform is BackendPlatform.MACOS else platform.value
+    return conda_platform_subdir(system, machine)
 
 
 def default_manifest_path() -> Path:

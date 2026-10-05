@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import platform
 from dataclasses import dataclass
 
@@ -24,9 +25,35 @@ def normalize_architecture(machine: str | None = None) -> str:
     return value or "unknown"
 
 
+def native_architecture(system: str | None = None, machine: str | None = None) -> str:
+    """Choose the separate engine's native architecture, including under Rosetta.
+
+    An explicit machine is a target override. Otherwise query the current
+    process on macOS: an Intel QGIS process can launch a native ARM engine.
+    """
+    architecture = normalize_architecture(machine)
+    if machine is None and (system or platform.system()).casefold() == "darwin" and architecture == "x86_64":
+        if _is_rosetta_process():
+            return "arm64"
+    return architecture
+
+
+def _is_rosetta_process() -> bool:
+    """Use Apple's process-local flag; a failed probe stays conservative."""
+    try:
+        sysctl = ctypes.CDLL(None).sysctlbyname
+        sysctl.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]
+        sysctl.restype = ctypes.c_int
+        translated = ctypes.c_int(0)
+        size = ctypes.c_size_t(ctypes.sizeof(translated))
+        return sysctl(b"sysctl.proc_translated", ctypes.byref(translated), ctypes.byref(size), None, 0) == 0 and translated.value == 1
+    except (AttributeError, OSError):
+        return False
+
+
 def conda_platform_subdir(system: str | None = None, machine: str | None = None) -> str:
     os_name = (system or platform.system()).casefold()
-    architecture = normalize_architecture(machine)
+    architecture = native_architecture(system, machine)
     mapping = {
         ("windows", "x86_64"): "win-64",
         ("windows", "arm64"): "win-arm64",
@@ -53,4 +80,4 @@ def host_platform_report(system: str | None = None, machine: str | None = None) 
     return HostPlatform(os_name, architecture, subdir, tested, note)
 
 
-__all__ = ["HostPlatform", "conda_platform_subdir", "host_platform_report", "normalize_architecture"]
+__all__ = ["HostPlatform", "conda_platform_subdir", "host_platform_report", "native_architecture", "normalize_architecture"]

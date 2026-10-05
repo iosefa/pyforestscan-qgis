@@ -19,13 +19,13 @@ class BackendManifestTests(unittest.TestCase):
         manifest = load_backend_manifest()
 
         self.assertEqual(manifest.schema_version, 1)
-        self.assertEqual(manifest.package_names(), ("python", "pdal", "python-pdal", "gdal", "rasterio", "numpy", "scipy", "pandas", "shapely", "pyproj", "fiona", "geopandas", "matplotlib", "tqdm", "pyforestscan"))
+        self.assertEqual(manifest.package_names(), ("python", "pdal", "python-pdal", "gdal", "rasterio", "numpy", "scipy", "pandas", "shapely", "pyproj", "fiona", "geopandas", "matplotlib", "tqdm", "requests", "pyforestscan"))
         versions = {package.name: package.version_spec for package in manifest.required_packages()}
-        self.assertEqual(versions["gdal"], ">=3.8,<3.10")
-        self.assertEqual(versions["rasterio"], ">=1.3.10,<1.5")
-        self.assertEqual(versions["numpy"], ">=1.26,<2.0")
-        self.assertEqual(versions["scipy"], ">=1.11,<1.15")
-        self.assertEqual(versions["matplotlib"], ">=3.8,<3.10")
+        self.assertEqual(versions["gdal"], ">=3.9,<4")
+        self.assertEqual(versions["rasterio"], ">=1.4,<2")
+        self.assertEqual(versions["numpy"], ">=2.3.1,<3")
+        self.assertEqual(versions["scipy"], ">=1.16,<2")
+        self.assertEqual(versions["matplotlib"], ">=3.10.3,<4")
         self.assertEqual(versions["tqdm"], ">=4.66,<5")
         self.assertIn("conda-forge", [channel.name for channel in manifest.channels])
         self.assertIn("micromamba", manifest.artifacts)
@@ -38,12 +38,12 @@ class BackendManifestTests(unittest.TestCase):
         self.assertEqual(spec.package_names(), manifest.package_names())
         self.assertEqual(spec.packages[0].version_spec, manifest.python_version)
 
-    def test_manifest_reports_missing_hash_for_platform(self) -> None:
+    def test_manifest_pins_bootstrap_hashes_for_all_platforms(self) -> None:
         manifest = load_backend_manifest()
         artifact = manifest.micromamba_artifact()
 
-        self.assertIsNone(artifact.sha256_for(BackendPlatform.LINUX))
-        self.assertFalse(artifact.sha256_for_platforms_present())
+        self.assertEqual(len(artifact.sha256_for(BackendPlatform.LINUX, machine="x86_64")), 64)
+        self.assertTrue(artifact.sha256_for_platforms_present())
 
     def test_manifest_corruption_fails_cleanly(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
