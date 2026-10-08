@@ -3,14 +3,17 @@ channels:
   - conda-forge
 dependencies:
   - python=3.12
-  - qgis=3.40
-  - python-pdal=3.4.5
-  - rasterio=1.4
-  - geopandas=1.1
-  - scipy
-  - shapely
-  - pandas
-  - matplotlib
+  - qgis>=4.0,<5
+  - python-pdal>=3.4.5
+  - rasterio>=1.4
+  - geopandas>=1.1
+  - numpy>=2.1.1
+  - pyproj>=3.6.1
+  - scipy>=1.14.1
+  - shapely>=2.0.6
+  - pandas>=2.2.2
+  - matplotlib>=3.9.2
+  - requests>=2.32.3
   - tqdm
   - pip
   - pip:

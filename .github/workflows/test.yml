@@ -1,0 +1,40 @@
+name: QGIS compatibility
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qgis:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        qgis: ["3.40", "4.2"]
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select QGIS version
+        run: sed 's/qgis>=4.0,<5/qgis=${{ matrix.qgis }}/' environment.yml > "$RUNNER_TEMP/environment.yml"
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          activate-environment: pyforestscan-qgis
+          environment-file: ${{ runner.temp }}/environment.yml
+          auto-activate-base: false
+      - name: Build and test the plugin package
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYFORESTSCAN_TEST_RUNTIME: "1"
+        run: |
+          scripts/package_plugin.sh
+          export QGIS_PREFIX_PATH="$CONDA_PREFIX"
+          export PYTHONPATH="$CONDA_PREFIX/share/qgis/python${PYTHONPATH:+:$PYTHONPATH}"
+          export PYFORESTSCAN_PLUGIN_PATH="$PWD/dist/pyforestscan_qgis"
+          python -m unittest discover -s tests -v

@@ -110,7 +110,7 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterFeatureSource(
                 self.POLYGON,
                 "Optional crop polygon",
-                [QgsProcessing.TypeVectorPolygon],
+                [QgsProcessing.SourceType.TypeVectorPolygon],
                 optional=True,
             )
         )
@@ -133,7 +133,7 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.VOXEL_XY,
                 "XY grid cell size",
-                QgsProcessingParameterNumber.Double,
+                QgsProcessingParameterNumber.Type.Double,
                 defaultValue=1.0,
                 minValue=0.000001,
             )
@@ -142,7 +142,7 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.VOXEL_Z,
                 "Height bin size",
-                QgsProcessingParameterNumber.Double,
+                QgsProcessingParameterNumber.Type.Double,
                 defaultValue=1.0,
                 minValue=0.000001,
             )
@@ -168,7 +168,7 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.MIN_HEIGHT,
                 "Minimum height for PAI",
-                QgsProcessingParameterNumber.Double,
+                QgsProcessingParameterNumber.Type.Double,
                 defaultValue=1.0,
                 minValue=0.0,
             )
@@ -177,7 +177,7 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.COVER_MIN_HEIGHT,
                 "Canopy cover minimum height",
-                QgsProcessingParameterNumber.Double,
+                QgsProcessingParameterNumber.Type.Double,
                 defaultValue=2.0,
                 minValue=0.0,
             )
@@ -186,7 +186,7 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.COVER_K,
                 "Canopy cover gap-fraction exponent",
-                QgsProcessingParameterNumber.Double,
+                QgsProcessingParameterNumber.Type.Double,
                 defaultValue=0.5,
                 minValue=0.000001,
             )

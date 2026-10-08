@@ -89,7 +89,7 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.TILE_WIDTH,
                 "Tile width",
-                QgsProcessingParameterNumber.Double,
+                QgsProcessingParameterNumber.Type.Double,
                 defaultValue=100.0,
                 minValue=0.000001,
             )
@@ -98,7 +98,7 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.TILE_HEIGHT,
                 "Tile height",
-                QgsProcessingParameterNumber.Double,
+                QgsProcessingParameterNumber.Type.Double,
                 defaultValue=100.0,
                 minValue=0.000001,
             )
@@ -107,7 +107,7 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.BUFFER_FRACTION,
                 "Buffer fraction",
-                QgsProcessingParameterNumber.Double,
+                QgsProcessingParameterNumber.Type.Double,
                 defaultValue=0.1,
                 minValue=0.0,
             )
@@ -124,7 +124,7 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.VOXEL_XY,
                 "XY grid cell size",
-                QgsProcessingParameterNumber.Double,
+                QgsProcessingParameterNumber.Type.Double,
                 defaultValue=1.0,
                 minValue=0.000001,
             )
@@ -133,7 +133,7 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.VOXEL_Z,
                 "Height bin size",
-                QgsProcessingParameterNumber.Double,
+                QgsProcessingParameterNumber.Type.Double,
                 defaultValue=1.0,
                 minValue=0.000001,
             )

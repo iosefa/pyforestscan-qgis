@@ -2,8 +2,9 @@
 name=PyForestScan
 description=QGIS Processing wrappers for PyForestScan LiDAR forest structure metrics.
 about=Runs PyForestScan workflows from the QGIS Processing Toolbox for local LAS/LAZ/COPC/EPT inputs and tiled EPT jobs.
-version=0.1.0
+version=0.1.1
 qgisMinimumVersion=3.22
+qgisMaximumVersion=4.99
 author=Joseph Emile Honour Percival
 email=ipercival@gmail.com
 category=Analysis
