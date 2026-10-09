@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.1 — Windows setup fix
+
+- Avoid duplicating the full download directory inside micromamba's package
+  cache. The installer supplies verified local archives while retaining their
+  original HTTPS URLs and SHA256 hashes in its explicit package manifest.
+- Delete owned Windows setup directories through extended-length paths,
+  including package files beyond the traditional 260-character limit.
+- Preserve the original setup failure if cleanup also fails, and retain a
+  generation's ownership marker after an interrupted deletion.
+- Allow a new installation beside unrecognized remnants of a failed 0.3.0
+  setup without deleting those remnants. Previously verified downloads are
+  reused; existing working engines do not need to be reinstalled.
+
+After a failed Windows setup, install the 0.3.1 ZIP, restart QGIS, and retry
+**Plugins → PyForestScan → Set up PyForestScan → Install engine**. No Windows
+registry changes or administrator instructions are part of this fix.
+
 ## 0.3.0 — internal release
 
 - Use QGIS's PDAL Processing tools for native point-cloud reading, crops,

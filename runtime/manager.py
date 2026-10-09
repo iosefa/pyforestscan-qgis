@@ -9,6 +9,7 @@ from contextlib import contextmanager
 import hashlib
 import json
 import math
+import ntpath
 import os
 from pathlib import Path
 import platform
@@ -124,6 +125,22 @@ def _ensure_owned(path, kind):
     _atomic_json(path / MARKER, {"owner": OWNER, "kind": kind, "schema": 1})
 
 
+def _windows_extended_path(path):
+    """Use Win32 Unicode paths without requiring a host manifest or registry change."""
+    path = ntpath.abspath(os.fspath(path))
+    if path.startswith("\\\\?\\"):
+        return path
+    if path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path[2:]
+    return "\\\\?\\" + path
+
+
+def _remove_tree(path):
+    # Prefix the traversal root, so every descendant retains long-path support
+    # even when QGIS's embedded Python does not opt into ordinary long paths.
+    shutil.rmtree(_windows_extended_path(path) if os.name == "nt" else path)
+
+
 def _remove_generation(path, base):
     path, base = Path(path), Path(base)
     if (
@@ -134,7 +151,38 @@ def _remove_generation(path, base):
         or not _owned(path, "generation")
     ):
         raise EngineError("Refusing to remove an unrecognized engine generation.")
-    shutil.rmtree(path)
+    try:
+        _remove_tree(path)
+    except Exception:
+        # rmtree may delete the sentinel before a later child fails. Keep this
+        # already-validated generation recognizable for a subsequent removal.
+        # Never adopt an unmarked directory encountered before this operation.
+        try:
+            if path.is_dir() and not path.is_symlink() and not (path / MARKER).exists():
+                _atomic_json(
+                    path / MARKER, {"owner": OWNER, "kind": "generation", "schema": 1}
+                )
+        except OSError:
+            pass  # Preserve the original deletion error if even this repair fails.
+        raise
+
+
+def _seed_package_cache(package_paths, package_cache):
+    """Make previously SHA256-verified archives available to offline micromamba."""
+    package_cache = Path(package_cache)
+    if package_cache.is_symlink():
+        raise EngineError("Refusing to populate a linked installer cache.")
+    package_cache.mkdir(parents=True, exist_ok=True)
+    for source, item in package_paths:
+        destination = package_cache / item["filename"]
+        if destination.exists() or destination.is_symlink():
+            raise EngineError(
+                "The new installer cache already contains a package file."
+            )
+        try:
+            os.link(source, destination)
+        except OSError:
+            shutil.copyfile(source, destination)
 
 
 @contextmanager
@@ -604,13 +652,19 @@ def install_engine(progress=None, cancel=None):
             explicit.write_text(
                 "@EXPLICIT\n"
                 + "\n".join(
-                    path.as_uri() + ("#" + item["md5"] if item.get("md5") else "")
-                    for path, item in package_paths
+                    item["url"] + "#sha256:" + item["sha256"]
+                    for _, item in package_paths
                 )
                 + "\n",
                 encoding="utf-8",
             )
             prefix = instance / "env"
+            # Micromamba 2.9 incorporates the complete archive URL in extracted
+            # cache paths. A local file:// URL repeats the entire user-data path,
+            # exceeding Windows MAX_PATH even for short package members. Keep
+            # the original HTTPS namespace and preseed verified archives locally
+            # so installation can reuse the cache without further downloads.
+            _seed_package_cache(package_paths, instance / "mamba" / "pkgs")
             # Installing into a fresh owned conda prefix avoids the create command
             # registering it in the user's global ~/.conda/environments.txt.
             (prefix / "conda-meta").mkdir(parents=True)
@@ -680,7 +734,7 @@ def install_engine(progress=None, cancel=None):
                     raise EngineError(
                         "Refusing to remove an unrecognized installer cache."
                     )
-                shutil.rmtree(installer_cache)
+                _remove_tree(installer_cache)
             _check_cancel(cancel)
             _atomic_json(
                 base / "active.json",
@@ -697,9 +751,21 @@ def install_engine(progress=None, cancel=None):
             if progress:
                 progress(100, "The PyForestScan engine is ready")
             return status()
-        finally:
+        except Exception as original:
             if not activated:
-                _remove_generation(instance, base)
+                try:
+                    _remove_generation(instance, base)
+                except Exception as cleanup:
+                    error_type = (
+                        EngineCanceled
+                        if isinstance(original, EngineCanceled)
+                        else EngineError
+                    )
+                    raise error_type(
+                        f"{original}\nTemporary engine cleanup also failed: {cleanup}. "
+                        "The previous working engine remains unchanged; setup can be retried."
+                    ) from original
+            raise
 
 
 def remove_engine(progress=None, cancel=None):

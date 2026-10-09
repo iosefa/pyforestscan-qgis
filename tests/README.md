@@ -212,3 +212,27 @@ Qt 5/Qt 6 builds. Relevant upstream guidance:
 
 - [QGIS 4 plugin metadata and migration](https://plugins.qgis.org/docs/migrate-qgis4)
 - [Qt 5 / Qt 6 plugin migration guide](https://github.com/qgis/QGIS/wiki/Plugin-migration-to-be-compatible-with-Qt5-and-Qt6)
+
+## 0.3.1 Windows installer regression
+
+The reported failure used a cache filename exactly 260 characters long.
+Micromamba's local-URL cache namespace repeated the download path, and Python
+cleanup could then fail at the Windows path limit. The revised installer seeds
+verified archives into its private cache and records original HTTPS URLs with
+SHA256 pins. A real macOS installation with this layout completed with zero
+additional package downloads and passed its scientific self-test.
+
+The installer suite now contains 22 tests, including original-error preservation,
+ownership restoration after partial deletion, safe retry beside unmarked legacy
+remnants, and cache preparation. A Windows-only test creates a real directory
+tree beyond 260 characters and removes it through the owned-generation path;
+it is skipped on macOS. GitHub Actions now runs these guards on Windows for
+every push/PR, independently of the optional full engine installation matrix.
+This configuration is not a recorded passing Windows run. The corrected setup
+still needs confirmation on the reporting Windows machine.
+
+Local 0.3.1 verification: the packaged plugin passed the 56-test QGIS 4.2.3
+native suite, with the Windows filesystem test and the separate worker
+scientific class skipped. All 11 scientific/protocol worker tests passed in
+the newly installed private engine. Ruff and archive/source consistency checks
+also passed. No point-cloud calculation code changed in this patch release.

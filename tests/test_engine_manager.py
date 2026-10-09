@@ -158,7 +158,82 @@ class EngineManagerTests(unittest.TestCase):
         self.assertFalse((base / "active.json").exists())
         self.assertEqual(cached.read_bytes(), b"retained")
 
-    def _installation(self, selftest):
+    def test_windows_extended_paths_cover_reported_failure_and_unc(self):
+        reported = (
+            r"C:\Users\example_account\AppData\Local\pyforestscan\engines"
+            r"\0.4.1-1-win-64\instances\814607b8d98e4b0481c661b4c9f1c02b"
+            r"\mamba\pkgs\file\C_\Users\example_account\AppData\Local"
+            r"\pyforestscan\engines\0.4.1-1-win-64\downloads"
+            r"\graphite2-1.3.15-h5112557_1\info\licenses"
+        )
+        self.assertEqual(len(reported), 260)
+        cases = (
+            (reported, "\\\\?\\" + reported),
+            (
+                r"C:\Users\person\engine\temporary\..\cache",
+                r"\\?\C:\Users\person\engine\cache",
+            ),
+            (r"\\server\share\engine", r"\\?\UNC\server\share\engine"),
+            (r"\\?\C:\engine\cache", r"\\?\C:\engine\cache"),
+            (r"\\?\UNC\server\share\engine", r"\\?\UNC\server\share\engine"),
+        )
+        for original, expected in cases:
+            with self.subTest(path=original):
+                self.assertEqual(manager._windows_extended_path(original), expected)
+
+    @unittest.skipUnless(os.name == "nt", "Requires the Windows filesystem")
+    def test_windows_removal_handles_descendants_longer_than_max_path(self):
+        base = self.owned()
+        generation = self.generation(base)
+        deep = generation.joinpath(*(["nested-" + "x" * 32] * 8))
+        filename = str(deep / "payload.txt")
+        self.assertGreater(len(filename), 260)
+        os.makedirs(manager._windows_extended_path(deep))
+        with open(manager._windows_extended_path(filename), "w") as stream:
+            stream.write("owned temporary package content")
+        try:
+            manager._remove_generation(generation, base)
+            self.assertFalse(generation.exists())
+        finally:
+            if generation.exists():
+                shutil.rmtree(manager._windows_extended_path(generation))
+
+    def test_partial_generation_removal_restores_ownership_for_retry(self):
+        base = self.owned()
+        generation = self.generation(base)
+        retained = generation / "locked-package.dll"
+        retained.write_bytes(b"still in use")
+
+        def partial_removal(path):
+            (Path(path) / manager.MARKER).unlink()
+            raise PermissionError("package file is temporarily locked")
+
+        with patch.object(manager, "_remove_tree", side_effect=partial_removal):
+            with self.assertRaisesRegex(PermissionError, "temporarily locked"):
+                manager._remove_generation(generation, base)
+        self.assertTrue(manager._owned(generation, "generation"))
+        self.assertEqual(retained.read_bytes(), b"still in use")
+        manager._remove_generation(generation, base)
+        self.assertFalse(generation.exists())
+
+    def test_package_cache_seed_copies_if_hard_links_are_unavailable(self):
+        source = Path(self.directory.name) / "example-1.0-0.conda"
+        source.write_bytes(b"verified archive")
+        package = {
+            "filename": source.name,
+            "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+            "size": source.stat().st_size,
+        }
+        cache = Path(self.directory.name) / "private-cache"
+        with patch.object(manager.os, "link", side_effect=OSError("no hard links")):
+            manager._seed_package_cache([(source, package)], cache)
+        target = cache / source.name
+        self.assertEqual(target.read_bytes(), source.read_bytes())
+        self.assertNotEqual(target.stat().st_ino, source.stat().st_ino)
+        target.unlink()
+        self.assertEqual(source.read_bytes(), b"verified archive")
+
+    def _installation(self, selftest, *, process_result=(0, ""), cleanup_failed=False):
         base = self.owned()
         previous = self.generation(base)
         lock, digest = manager._lock_data()
@@ -172,6 +247,7 @@ class EngineManagerTests(unittest.TestCase):
             },
         )
         before = (base / "active.json").read_bytes()
+        initial_generations = set((base / "instances").iterdir())
 
         def download(url, destination, digest, size, cancel=None, progress=None):
             destination = Path(destination)
@@ -182,6 +258,7 @@ class EngineManagerTests(unittest.TestCase):
         def process(command, **kwargs):
             self.assertEqual(command[1], "install")
             self.assertIn("--no-env", command)
+            self.assertIn("--offline", command)
             config = Path(command[command.index("--rc-file") + 1])
             self.assertEqual(config.suffix, ".yaml")
             prefix = Path(command[command.index("--prefix") + 1])
@@ -190,10 +267,23 @@ class EngineManagerTests(unittest.TestCase):
                 json.loads(config.read_text())["pkgs_dirs"],
                 [str(prefix.parent / "mamba" / "pkgs")],
             )
+            explicit = Path(command[command.index("--file") + 1]).read_text()
+            self.assertEqual(
+                explicit.splitlines(),
+                ["@EXPLICIT"]
+                + [
+                    package["url"] + "#sha256:" + package["sha256"]
+                    for package in lock["packages"]
+                ],
+            )
+            self.assertNotIn("file://", explicit)
+            for package in lock["packages"]:
+                archive = prefix.parent / "mamba" / "pkgs" / package["filename"]
+                self.assertEqual(archive.read_bytes(), b"test artifact")
             python = manager._python(prefix)
-            python.parent.mkdir(parents=True)
+            python.parent.mkdir(parents=True, exist_ok=True)
             python.write_text("new interpreter")
-            return 0, ""
+            return process_result
 
         with (
             patch.object(manager, "_download_verified", side_effect=download),
@@ -204,7 +294,11 @@ class EngineManagerTests(unittest.TestCase):
                 result = manager.install_engine()
             except client.EngineError:
                 self.assertEqual((base / "active.json").read_bytes(), before)
-                self.assertEqual(list((base / "instances").iterdir()), [previous])
+                remaining = set((base / "instances").iterdir())
+                if cleanup_failed:
+                    self.assertTrue(initial_generations < remaining)
+                else:
+                    self.assertEqual(remaining, initial_generations)
                 raise
         return base, previous, result
 
@@ -227,6 +321,42 @@ class EngineManagerTests(unittest.TestCase):
     def test_selftest_not_ready_cannot_activate(self):
         with self.assertRaisesRegex(client.EngineError, "did not pass"):
             self._installation(lambda *a, **k: {"ready": False})
+
+    def test_cleanup_failure_preserves_original_installer_error(self):
+        with patch.object(
+            manager, "_remove_generation", side_effect=OSError("cleanup is locked")
+        ):
+            with self.assertRaises(client.EngineError) as caught:
+                self._installation(
+                    lambda *a, **k: self.fail("Failed installer must not self-test"),
+                    process_result=(1, "specific package extraction failure"),
+                    cleanup_failed=True,
+                )
+        self.assertIn("specific package extraction failure", str(caught.exception))
+        self.assertIn("cleanup is locked", str(caught.exception))
+
+    def test_cleanup_failure_keeps_cancellation_type(self):
+        def canceled(*args, **kwargs):
+            raise client.EngineCanceled("installation was canceled")
+
+        with patch.object(
+            manager, "_remove_generation", side_effect=OSError("cleanup is locked")
+        ):
+            with self.assertRaises(client.EngineCanceled) as caught:
+                self._installation(canceled, cleanup_failed=True)
+        self.assertIn("installation was canceled", str(caught.exception))
+        self.assertIn("cleanup is locked", str(caught.exception))
+
+    def test_retry_can_install_beside_unsentinelled_legacy_remnant(self):
+        base = self.owned()
+        legacy = base / "instances" / ("b" * 32)
+        legacy.mkdir()
+        retained = legacy / "package-fragment.txt"
+        retained.write_text("legacy data must remain untouched")
+        _, _, result = self._installation(lambda *a, **k: {"ready": True})
+        self.assertTrue(result["installed"])
+        self.assertFalse((legacy / manager.MARKER).exists())
+        self.assertEqual(retained.read_text(), "legacy data must remain untouched")
 
     def test_environment_removes_host_qgis_and_python_overrides(self):
         pollution = {
