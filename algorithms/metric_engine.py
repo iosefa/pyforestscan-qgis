@@ -134,7 +134,7 @@ def compute_metrics(
     Dense grids are limited to five million cells/voxels before allocation.
     """
     import numpy as np
-    from pyforestscan import calculate
+    from ..vendor.pyforestscan import calculate
 
     names = tuple(dict.fromkeys(metric_names))
     unknown = set(names).difference(METRIC_NAMES)
@@ -270,11 +270,10 @@ def write_metric_raster(result, path, crs, z_resolution=1):
     """Atomically write a 2D metric or a PAD cube as a float32 GeoTIFF.
 
     PAD band 1 is the lowest HAG interval. Values use NaN NoData; the array's
-    X,Y axes are transposed to rasterio's row,column order for every band.
+    X,Y axes are transposed to GDAL's row,column order for every band.
     """
     import numpy as np
-    import rasterio
-    from rasterio.transform import from_bounds
+    from osgeo import gdal, osr
 
     data = np.asarray(result.data)
     if data.ndim not in (2, 3) or not all(data.shape):
@@ -293,57 +292,77 @@ def write_metric_raster(result, path, crs, z_resolution=1):
     ):
         raise ValueError(f"Invalid raster extent: {result.extent}.")
     dz = _number(z_resolution, "Height bin size", positive=True)
+    reference = osr.SpatialReference()
+    if reference.SetFromUserInput(str(crs)) != 0:
+        raise ValueError("The output raster CRS is invalid.")
     output = os.path.abspath(os.fspath(path))
     os.makedirs(os.path.dirname(output), exist_ok=True)
     fd, temporary = tempfile.mkstemp(
         prefix=".pyforestscan-", suffix=".tif", dir=os.path.dirname(output)
     )
     os.close(fd)
+    raster = None
     try:
-        with rasterio.open(
+        raster = gdal.GetDriverByName("GTiff").Create(
             temporary,
-            "w",
-            driver="GTiff",
-            width=data.shape[0],
-            height=data.shape[1],
-            count=count,
-            dtype="float32",
-            crs=crs,
-            transform=from_bounds(xmin, ymin, xmax, ymax, data.shape[0], data.shape[1]),
-            nodata=float("nan"),
-            compress="deflate",
-            predictor=3,
-        ) as raster:
+            data.shape[0],
+            data.shape[1],
+            count,
+            gdal.GDT_Float32,
+            options=["COMPRESS=DEFLATE", "PREDICTOR=3"],
+        )
+        if raster is None:
+            raise RuntimeError("Could not create the output GeoTIFF.")
+        raster.SetGeoTransform(
+            (
+                xmin,
+                (xmax - xmin) / data.shape[0],
+                0,
+                ymax,
+                0,
+                -(ymax - ymin) / data.shape[1],
+            )
+        )
+        raster.SetProjection(reference.ExportToWkt())
+        if data.ndim == 3:
+            raster.SetMetadata(
+                {
+                    "metric": "Plant Area Density",
+                    "array_axes": "X,Y,HeightAboveGround",
+                    "height_origin": "0",
+                    "height_bin_size": str(dz),
+                    "height_units": "m",
+                    "pad_units": "m2/m3",
+                    "ground_band": "masked by PyForestScan",
+                }
+            )
+        for index in range(count):
+            values = data[:, :, index] if data.ndim == 3 else data
+            with np.errstate(over="ignore", invalid="ignore"):
+                values = np.asarray(values.T, dtype="float32").copy()
+            values[~np.isfinite(values)] = np.nan
+            band = raster.GetRasterBand(index + 1)
+            band.SetNoDataValue(float("nan"))
+            if band.WriteArray(values) != 0:
+                raise RuntimeError("Could not write the output raster band.")
             if data.ndim == 3:
-                raster.update_tags(
-                    metric="Plant Area Density",
-                    array_axes="X,Y,HeightAboveGround",
-                    height_origin="0",
-                    height_bin_size=str(dz),
-                    height_units="m",
-                    pad_units="m2/m3",
-                    ground_band="masked by PyForestScan",
+                lower, upper = index * dz, (index + 1) * dz
+                band.SetDescription(f"PAD: HeightAboveGround {lower:g}–{upper:g} m")
+                band.SetMetadata(
+                    {
+                        "height_min": str(lower),
+                        "height_max": str(upper),
+                        "height_units": "m",
+                        "units": "m2/m3",
+                    }
                 )
-            for index in range(count):
-                values = data[:, :, index] if data.ndim == 3 else data
-                with np.errstate(over="ignore", invalid="ignore"):
-                    band = np.asarray(values.T, dtype="float32").copy()
-                band[~np.isfinite(band)] = np.nan
-                raster.write(band, index + 1)
-                if data.ndim == 3:
-                    lower, upper = index * dz, (index + 1) * dz
-                    raster.set_band_description(
-                        index + 1, f"PAD: HeightAboveGround {lower:g}–{upper:g} m"
-                    )
-                    raster.update_tags(
-                        index + 1,
-                        height_min=str(lower),
-                        height_max=str(upper),
-                        height_units="m",
-                        units="m2/m3",
-                    )
+            band = None
+        if raster.FlushCache() not in (None, 0):
+            raise RuntimeError("Could not flush the output GeoTIFF.")
+        raster = None
         os.replace(temporary, output)
     finally:
+        raster = None
         if os.path.exists(temporary):
             os.unlink(temporary)
     return output

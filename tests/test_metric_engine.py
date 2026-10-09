@@ -1,6 +1,7 @@
 """Analytic checks for forest metrics and GIS outputs; no QGIS runtime needed."""
 
-import importlib.util
+import importlib
+import types
 import math
 import os
 from pathlib import Path
@@ -9,26 +10,28 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+PLUGIN_ROOT = Path(
+    os.environ.get("PYFORESTSCAN_PLUGIN_PATH", Path(__file__).resolve().parents[1])
+)
+_package = types.ModuleType("_pyforestscan_metric_tests")
+_package.__path__ = [str(PLUGIN_ROOT)]
+sys.modules[_package.__name__] = _package
 try:
     import numpy as np
     import rasterio
-    from pyforestscan import calculate
+    from osgeo import gdal
+
+    calculate = importlib.import_module(
+        _package.__name__ + ".vendor.pyforestscan.calculate"
+    )
+    _engine = importlib.import_module(_package.__name__ + ".algorithms.metric_engine")
 except (ImportError, OSError) as exc:
     if os.environ.get("PYFORESTSCAN_TEST_RUNTIME") == "1":
         raise
     raise unittest.SkipTest(
-        f"Metric tests require the PyForestScan runtime: {exc}"
+        f"Metric tests require NumPy, SciPy, GDAL and rasterio: {exc}"
     ) from exc
 
-PLUGIN_ROOT = Path(
-    os.environ.get("PYFORESTSCAN_PLUGIN_PATH", Path(__file__).resolve().parents[1])
-)
-_spec = importlib.util.spec_from_file_location(
-    "pyforestscan_test_metric_engine", PLUGIN_ROOT / "algorithms" / "metric_engine.py"
-)
-_engine = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = _engine
-_spec.loader.exec_module(_engine)
 MetricResult = _engine.MetricResult
 compute_metrics = _engine.compute_metrics
 write_metric_raster = _engine.write_metric_raster
@@ -177,7 +180,7 @@ class MetricEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="pyforestscan-metrics-") as folder:
             path = Path(folder) / "too-many-bands.tif"
             with patch.object(
-                rasterio, "open", side_effect=AssertionError("must not write")
+                gdal, "GetDriverByName", side_effect=AssertionError("must not write")
             ):
                 with self.assertRaisesRegex(ValueError, "65,535-band"):
                     write_metric_raster(result, path, "EPSG:32610")
@@ -224,7 +227,7 @@ class MetricEngineTests(unittest.TestCase):
             path = Path(folder) / "existing.tif"
             path.write_bytes(b"previous output")
             with patch.object(
-                rasterio, "open", side_effect=RuntimeError("write failed")
+                gdal, "GetDriverByName", side_effect=RuntimeError("write failed")
             ):
                 with self.assertRaises(RuntimeError):
                     write_metric_raster(result, path, "EPSG:32610")

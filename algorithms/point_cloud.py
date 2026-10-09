@@ -1,7 +1,6 @@
-"""Resolve QGIS inputs once, then process their full-resolution source with PDAL."""
+"""Resolve QGIS inputs once for the native backend or isolated processing engine."""
 
-from dataclasses import dataclass, replace
-import json
+from dataclasses import dataclass, field, replace
 import os
 from urllib.parse import unquote, urlsplit
 
@@ -33,6 +32,8 @@ class PreparedPointCloud:
     filters: tuple
     hag_method: str
     dtm_path: object = None
+    backend: str = "native"
+    info: dict = field(default_factory=dict)
 
     @property
     def stages(self):
@@ -129,15 +130,22 @@ def _source_path(path):
     return path
 
 
-def _metadata(reader):
-    import pdal
-
+def _metadata(reader, backend, context, feedback):
     try:
-        info = pdal.Pipeline(json.dumps([reader])).quickinfo
-        if isinstance(info, str):
-            info = json.loads(info)
-        return next(iter(info.values()))
-    except (RuntimeError, ValueError, StopIteration, TypeError) as exc:
+        if backend == "native":
+            from .native_cloud import native_metadata
+
+            return native_metadata(
+                reader["filename"], reader["type"], context, feedback
+            )
+        from ..runtime.client import call_engine
+
+        info = call_engine("metadata", {"reader": reader}, feedback=feedback)
+        # Accept a reader preview directly, as well as PDAL's wrapped quickinfo.
+        return (
+            info if "srs" in info or "num_points" in info else next(iter(info.values()))
+        )
+    except (RuntimeError, ValueError, StopIteration, TypeError, OSError) as exc:
         raise QgsProcessingException(
             f"Could not read the point cloud metadata: {exc}"
         ) from exc
@@ -152,11 +160,9 @@ def _metadata_crs(info):
 
 def _same_horizontal_crs(first, second):
     # A LAS may include a vertical CRS while a raster/layer advertises its horizontal CRS.
-    import pyproj
-
-    a = pyproj.CRS.from_wkt(first.toWkt()).to_2d()
-    b = pyproj.CRS.from_wkt(second.toWkt()).to_2d()
-    return a.equals(b, ignore_axis_order=True)
+    a = first.horizontalCrs()
+    b = second.horizontalCrs()
+    return (a if a.isValid() else first) == (b if b.isValid() else second)
 
 
 def _crop_polygon(algorithm, parameters, context, crs):
@@ -216,18 +222,28 @@ def _dtm_path(algorithm, parameters, context, crs):
         raise QgsProcessingException(
             "The terrain raster must be a local GDAL-readable file."
         )
-    import rasterio
+    from osgeo import gdal
 
-    with rasterio.open(path) as raster:
-        stored_crs = (
-            QgsCoordinateReferenceSystem(raster.crs.to_wkt())
-            if raster.crs
-            else QgsCoordinateReferenceSystem()
-        )
+    raster = gdal.OpenEx(path, gdal.OF_RASTER | gdal.OF_READONLY)
+    if raster is None:
+        raise QgsProcessingException("The terrain raster could not be opened by GDAL.")
+    try:
+        stored_crs = QgsCoordinateReferenceSystem(raster.GetProjectionRef())
         if not stored_crs.isValid() or not _same_horizontal_crs(stored_crs, crs):
             raise QgsProcessingException(
                 "The terrain raster's stored CRS must match the point cloud; assigning a layer CRS does not reproject its data."
             )
+        from .common import require_metric_crs
+
+        require_metric_crs(stored_crs)
+        unit = raster.GetRasterBand(1).GetUnitType().strip().lower()
+        if unit and unit not in ("m", "metre", "meter", "metres", "meters"):
+            raise QgsProcessingException(
+                f"The terrain raster band 1 declares elevation units '{unit}'. "
+                "Convert terrain elevations to metres before calculating height above ground."
+            )
+    finally:
+        raster = None
     return path
 
 
@@ -239,10 +255,13 @@ def prepare_point_cloud(
     hag_method=None,
     input_name="INPUT",
     crs_name="INPUT_CRS",
+    backend="native",
 ):
     """Call from prepareAlgorithm so QGIS layers never cross the worker boundary."""
     if feedback.isCanceled():
         raise QgsProcessingException("Processing canceled.")
+    if backend not in ("native", "engine"):
+        raise QgsProcessingException("Unknown point cloud processing backend.")
     supplied_layer = _provided(parameters, "INPUT_LAYER")
     path = algorithm.parameterAsString(parameters, input_name, context).strip()
     if supplied_layer and path:
@@ -285,7 +304,13 @@ def prepare_point_cloud(
         )
     path = _source_path(path)
     reader = {"type": point_cloud_reader(path), "filename": path}
-    info = _metadata(reader)
+    info = _metadata(reader, backend, context, feedback)
+    if backend == "native" and reader["type"] == "readers.ept":
+        feedback.pushInfo(
+            "QGIS stages EPT points through LAS. Floating-coordinate EPT without stored "
+            "LAS scales may be rounded to 0.01 m; select the isolated engine in "
+            "PyForestScan setup when finer source precision is required."
+        )
     native_crs = _metadata_crs(info)
     assigned_crs = algorithm.parameterAsCrs(parameters, crs_name, context)
     if native_crs.isValid():
@@ -363,6 +388,8 @@ def prepare_point_cloud(
         tuple(filters),
         hag_method,
         dtm_path,
+        backend,
+        info,
     )
 
 
@@ -382,7 +409,7 @@ def with_point_cloud_bounds(prepared, bounds):
     return replace(prepared, reader=reader, filters=tuple(filters), bounds=bounds)
 
 
-def validate_points(points, prepared):
+def validate_points(points, prepared, feedback=None):
     """Reject empty/invalid heights, including terrain NoData and uncovered points."""
     import numpy as np
 
@@ -394,7 +421,9 @@ def validate_points(points, prepared):
         raise QgsProcessingException("The point cloud contains nonfinite coordinates.")
     if prepared.hag_method != "none":
         if "HeightAboveGround" not in (points.dtype.names or ()):
-            raise QgsProcessingException("HeightAboveGround was not produced by PDAL.")
+            raise QgsProcessingException(
+                "HeightAboveGround was not produced by the point cloud backend."
+            )
         if (
             not np.isfinite(points["HeightAboveGround"]).all()
             or (points["HeightAboveGround"] <= -1e29).any()
@@ -414,61 +443,24 @@ def validate_points(points, prepared):
                 "Delaunay height above ground requires ground points that are not all on one line."
             )
     if prepared.dtm_path:
-        import rasterio
+        from .native_cloud import sample_terrain
 
-        with rasterio.open(prepared.dtm_path) as raster:
-            # Check actual point locations, rather than rejecting holes elsewhere in the DTM.
-            for start in range(0, points.size, 65536):
-                chunk = points[start : start + 65536]
-                rows, columns = rasterio.transform.rowcol(
-                    raster.transform, chunk["X"], chunk["Y"]
-                )
-                rows, columns = np.asarray(rows), np.asarray(columns)
-                if (
-                    (rows < 0)
-                    | (columns < 0)
-                    | (rows >= raster.height)
-                    | (columns >= raster.width)
-                ).any():
-                    raise QgsProcessingException(
-                        "The terrain raster must cover every processed point with valid band 1 elevations."
-                    )
-                locations = zip(chunk["X"], chunk["Y"])
-                values = np.ma.vstack(
-                    list(raster.sample(locations, indexes=1, masked=True))
-                )
-                if (
-                    np.ma.getmaskarray(values).any()
-                    or not np.isfinite(values.data).all()
-                ):
-                    raise QgsProcessingException(
-                        "The terrain raster must cover every processed point with valid band 1 elevations."
-                    )
+        sample_terrain(prepared.dtm_path, points["X"], points["Y"], feedback)
 
 
-def read_point_cloud(prepared, feedback, allow_empty=False):
-    import numpy as np
-    import pdal
-
+def read_point_cloud(prepared, feedback, allow_empty=False, context=None):
     if feedback.isCanceled():
         raise QgsProcessingException("Processing canceled.")
     feedback.pushInfo("Reading full-resolution point cloud data.")
-    try:
-        pipeline = pdal.Pipeline(json.dumps(prepared.stages))
-        pipeline.execute()
-        arrays = pipeline.arrays
-    except RuntimeError as exc:
-        raise QgsProcessingException(f"Point cloud processing failed: {exc}") from exc
-    if feedback.isCanceled():
-        raise QgsProcessingException("Processing canceled.")
-    if not arrays:
-        if allow_empty:
-            return np.empty(0, dtype=[])
+    if prepared.backend != "native":
         raise QgsProcessingException(
-            "No points were returned for the selected source and crop."
+            "Engine point arrays must be processed inside the isolated engine job."
         )
-    points = arrays[0] if len(arrays) == 1 else np.concatenate(arrays)
-    if allow_empty and points.size == 0:
-        return points
-    validate_points(points, prepared)
-    return points
+    from .native_cloud import read_native
+
+    try:
+        return read_native(prepared, feedback, context=context, allow_empty=allow_empty)
+    except (RuntimeError, ValueError, OSError) as exc:
+        raise QgsProcessingException(
+            f"Native point cloud processing failed: {exc}"
+        ) from exc

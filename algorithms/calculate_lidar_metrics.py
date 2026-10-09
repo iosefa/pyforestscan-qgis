@@ -28,7 +28,7 @@ from .common import (
     ensure_output_folder,
     help_url,
     protect_input_paths,
-    raise_for_missing_dependencies,
+    ensure_backend,
     require_metric_crs,
 )
 from .point_cloud import (
@@ -221,8 +221,10 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
             self.addOutput(QgsProcessingOutputString("OUTPUT_FILES", "Created files"))
 
     def prepareAlgorithm(self, parameters, context, feedback):
-        raise_for_missing_dependencies(QgsProcessingException)
-        self._prepared = prepare_point_cloud(self, parameters, context, feedback)
+        self._backend = ensure_backend("metrics", parameters, context, self, feedback)
+        self._prepared = prepare_point_cloud(
+            self, parameters, context, feedback, backend=self._backend
+        )
         require_metric_crs(QgsCoordinateReferenceSystem(self._prepared.crs_wkt))
         return True
 
@@ -268,9 +270,6 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
             paths.values(), [self._prepared.path, self._prepared.dtm_path]
         )
         check_canceled(feedback)
-        feedback.pushInfo("Reading full-resolution point cloud data.")
-        points = read_point_cloud(self._prepared, feedback)
-        feedback.setProgress(25)
         z_resolution = (
             self.parameterAsDouble(parameters, "VOXEL_Z", context)
             if self.parameterDefinition("VOXEL_Z")
@@ -293,12 +292,43 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
                 self.parameterAsEnum(parameters, "VOXEL_STAT", context)
             ]
         try:
-            results = compute_metrics(
-                points,
-                selected,
-                xy_resolution=self.parameterAsDouble(parameters, "VOXEL_XY", context),
-                **options,
-            )
+            if self._backend == "engine":
+                from dataclasses import asdict
+                from ..runtime.client import call_engine
+
+                engine_options = {
+                    key: value for key, value in options.items() if key != "feedback"
+                }
+                engine_options["xy_resolution"] = self.parameterAsDouble(
+                    parameters, "VOXEL_XY", context
+                )
+                engine_result = call_engine(
+                    "metrics",
+                    {
+                        "prepared": asdict(self._prepared),
+                        "metrics": selected,
+                        "options": engine_options,
+                        "paths": paths,
+                        "z_resolution": z_resolution,
+                    },
+                    feedback,
+                )
+                results = {
+                    "rumple": engine_result.get("rumple")
+                    if engine_result.get("rumple") is not None
+                    else float("nan")
+                }
+            else:
+                points = read_point_cloud(self._prepared, feedback, context=context)
+                feedback.setProgress(25)
+                results = compute_metrics(
+                    points,
+                    selected,
+                    xy_resolution=self.parameterAsDouble(
+                        parameters, "VOXEL_XY", context
+                    ),
+                    **options,
+                )
             check_canceled(feedback)
             outputs = (
                 {}
@@ -310,15 +340,17 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
                 check_canceled(feedback)
                 path = paths[key]
                 if key == "rumple":
-                    write_rumple_report(path, results[key])
+                    if self._backend != "engine":
+                        write_rumple_report(path, results[key])
                     outputs.update(RUMPLE=results[key], RUMPLE_REPORT=path)
                 else:
-                    write_metric_raster(
-                        results[key],
-                        path,
-                        self._prepared.crs_wkt,
-                        z_resolution=z_resolution,
-                    )
+                    if self._backend != "engine":
+                        write_metric_raster(
+                            results[key],
+                            path,
+                            self._prepared.crs_wkt,
+                            z_resolution=z_resolution,
+                        )
                     output_key = "OUTPUT" if self.metric else METRIC_INFO[key][3]
                     outputs[output_key] = path
                     if not self.metric and self.parameterAsBool(

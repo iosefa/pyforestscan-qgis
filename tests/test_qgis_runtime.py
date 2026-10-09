@@ -185,20 +185,41 @@ class QgisRuntimeTests(unittest.TestCase):
     def test_dependency_errors_are_reported(self):
         results = [
             DependencyResult(
-                "pdal",
-                "PDAL Python bindings",
+                "scipy",
+                "SciPy",
                 False,
                 error="ImportError: library not loaded",
             )
         ]
-        with patch.object(dependency_check, "check_dependencies", return_value=results):
+        with (
+            patch.object(dependency_check, "check_dependencies", return_value=results),
+            patch(
+                "pyforestscan_qgis.runtime.manager.status",
+                return_value={"installed": False},
+            ),
+        ):
             result = self.run_algorithm("checkdependencies", {})
         self.assertTrue(result["STATUS"].startswith("FAIL\n"))
         self.assertIn("library not loaded", result["STATUS"])
 
+        with (
+            patch.object(dependency_check, "check_dependencies", return_value=results),
+            patch(
+                "pyforestscan_qgis.runtime.manager.status",
+                return_value={"installed": True},
+            ),
+            patch(
+                "pyforestscan_qgis.runtime.client.call_engine",
+                return_value={"ready": True},
+            ),
+        ):
+            result = self.run_algorithm("checkdependencies", {})
+        self.assertTrue(result["STATUS"].startswith("OK\n"))
+        self.assertIn("engine passed", result["STATUS"])
+
     def create_point_cloud(self, name="forest.las", normalized=False):
         import numpy as np
-        import pdal
+        from pyforestscan_qgis.vendor import laspy
 
         # Flat 4 m canopy over 100 m terrain, with one unsampled cell.
         fields = [
@@ -220,32 +241,39 @@ class QgisRuntimeTests(unittest.TestCase):
             rows = [(*row, row[2] - 100) for row in rows]
         points = np.array(rows, dtype=fields)
         path = self.root / name
-        # PDAL writers interpret # as a point-view placeholder; rename the fixture
-        # afterward so readers are tested with a literal # in its real filename.
-        write_path = path.with_name(path.name.replace("#", "-"))
-        pdal.Pipeline(
-            json.dumps(
-                [
-                    {
-                        "type": "writers.las",
-                        "filename": str(write_path),
-                        "a_srs": "EPSG:32610",
-                        "minor_version": 4,
-                        "dataformat_id": 6,
-                        "extra_dims": "all",
-                        "compression": name.endswith(".laz"),
-                        "scale_x": 0.000001,
-                        "scale_y": 0.000001,
-                        "scale_z": 0.001,
-                        "offset_x": 500000,
-                        "offset_y": 4100000,
-                    }
-                ]
-            ),
-            arrays=[points],
-        ).execute()
-        if write_path != path:
-            write_path.rename(path)
+        header = laspy.LasHeader(point_format=6, version="1.4")
+        header.scales = [0.000001, 0.000001, 0.001]
+        header.offsets = [500000, 4100000, 0]
+        header.vlrs.append(
+            laspy.vlrs.known.WktCoordinateSystemVlr(
+                QgsCoordinateReferenceSystem("EPSG:32610").toWkt()
+            )
+        )
+        header.global_encoding.wkt = True
+        header.add_extra_dim(laspy.ExtraBytesParams(name="CustomAttribute", type="f8"))
+        if normalized:
+            header.add_extra_dim(
+                laspy.ExtraBytesParams(name="HeightAboveGround", type="f8")
+            )
+        cloud = laspy.LasData(header)
+        cloud.x, cloud.y, cloud.z = points["X"], points["Y"], points["Z"]
+        cloud.classification = points["Classification"]
+        cloud.CustomAttribute = points["CustomAttribute"]
+        if normalized:
+            cloud.HeightAboveGround = points["HeightAboveGround"]
+        if name.lower().endswith(".las"):
+            cloud.write(path)
+        else:
+            uncompressed = self.root / "fixture-source.las"
+            cloud.write(uncompressed)
+            safe_path = path.with_name(path.name.replace("#", "-"))
+            self.native_algorithm(
+                "pdal:convertformat",
+                {"INPUT": str(uncompressed), "OUTPUT": str(safe_path)},
+            )
+            if safe_path != path:
+                safe_path.rename(path)
+            uncompressed.unlink()
         return path, points
 
     def load_cloud(self, path):
@@ -256,12 +284,116 @@ class QgisRuntimeTests(unittest.TestCase):
         self.project.addMapLayer(layer)
         return layer
 
-    def read_cloud(self, path):
-        import pdal
+    def native_algorithm(self, algorithm_id, parameters):
+        from qgis.analysis import QgsPdalAlgorithms
 
-        pipeline = pdal.Pipeline(json.dumps([str(path)]))
-        pipeline.execute()
-        return pipeline.arrays[0]
+        registry = QgsApplication.processingRegistry()
+        if registry.providerById("pdal") is None:
+            registry.addProvider(QgsPdalAlgorithms())
+        if Qgis.QGIS_VERSION_INT < 40000 and algorithm_id == "pdal:convertformat":
+            # Old conversion drops extra dimensions, and Create COPC drops the
+            # fixture CRS. Keep fixture generation independent of those writers.
+            source, output = str(parameters["INPUT"]), str(parameters["OUTPUT"])
+            reader = (
+                "readers.copc"
+                if source.lower().endswith(".copc.laz")
+                else "readers.las"
+            )
+            writer = {
+                "type": "writers.copc"
+                if output.lower().endswith(".copc.laz")
+                else "writers.las",
+                "filename": output,
+                "forward": "all",
+                "extra_dims": "all",
+            }
+            self.engine_fixture_pipeline([{"type": reader, "filename": source}, writer])
+            return {"OUTPUT": output}
+        algorithm = registry.createAlgorithmById(algorithm_id)
+        self.assertIsNotNone(algorithm, algorithm_id)
+        feedback = QgsProcessingFeedback()
+        result, ok = algorithm.run(parameters, self.context, feedback)
+        self.assertTrue(ok, feedback.textLog())
+        return result
+
+    def engine_fixture_pipeline(self, stages):
+        """Run a test-only pipeline without importing Python PDAL into QGIS."""
+        import subprocess
+        from pyforestscan_qgis.runtime import manager
+        from pyforestscan_qgis.runtime.client import sanitized_environment
+
+        interpreter = manager.engine_python()
+        self.assertIsNotNone(interpreter, "QGIS 3.40 fixtures need the private engine")
+        script = """import os, sys
+from pathlib import Path
+handles = []
+if os.name == 'nt' and hasattr(os, 'add_dll_directory'):
+    handles = [os.add_dll_directory(str(path)) for path in
+               (Path(sys.prefix) / 'Library' / 'bin', Path(sys.prefix) / 'DLLs')
+               if path.is_dir()]
+import pdal
+pdal.Pipeline(sys.argv[1]).execute()
+"""
+        process = subprocess.run(
+            [str(interpreter), "-I", "-c", script, json.dumps(stages)],
+            env=sanitized_environment(interpreter),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+
+    def read_cloud(self, path):
+        import numpy as np
+        from pyforestscan_qgis.vendor import laspy
+        from uuid import uuid4
+
+        uncompressed = None
+        if not str(path).lower().endswith(".las"):
+            uncompressed = self.root / f"read-{uuid4().hex}.las"
+            if Qgis.QGIS_VERSION_INT < 40000:
+                # QGIS 3.40's conversion writer drops extra dimensions. Read
+                # independently through private PDAL, preserving the LAS header
+                # and every dimension without loading its libraries into QGIS.
+                reader = (
+                    "readers.copc"
+                    if str(path).lower().endswith(".copc.laz")
+                    else "readers.las"
+                )
+                self.engine_fixture_pipeline(
+                    [
+                        {"type": reader, "filename": str(path)},
+                        {
+                            "type": "writers.las",
+                            "filename": str(uncompressed),
+                            "minor_version": 4,
+                            "forward": "all",
+                            "extra_dims": "all",
+                            "compression": False,
+                        },
+                    ]
+                )
+            else:
+                self.native_algorithm(
+                    "pdal:convertformat",
+                    {"INPUT": str(path), "OUTPUT": str(uncompressed)},
+                )
+        cloud = laspy.read(uncompressed or path)
+        values = {
+            name: np.asarray(cloud[name]) for name in cloud.point_format.dimension_names
+        }
+        for axis in "XYZ":
+            values[axis] = np.asarray(getattr(cloud, axis.lower()))
+        values["Classification"] = values.pop("classification")
+        result = np.empty(
+            len(cloud.points),
+            dtype=[(name, value.dtype) for name, value in values.items()],
+        )
+        for name, value in values.items():
+            result[name] = value
+        if uncompressed:
+            uncompressed.unlink()
+        return result
 
     def create_ept(self, points):
         ept = self.root / "ept"
@@ -446,6 +578,8 @@ class QgisRuntimeTests(unittest.TestCase):
 
     @runtime
     def test_input_errors_and_source_protection(self):
+        import numpy as np
+
         source, _ = self.create_point_cloud()
         layer = self.load_cloud(source)
         output = str(self.root / "output.las")
@@ -464,34 +598,23 @@ class QgisRuntimeTests(unittest.TestCase):
         alias = self.root / "source_alias.las"
         alias.symlink_to(source)
         cases.append(({"INPUT": str(source), "OUTPUT": str(alias)}, "must differ"))
-        cases.append(
-            (
-                {
-                    "INPUT": str(source),
-                    "OUTPUT": str(self.root / "output#folder" / "hag.las"),
-                },
-                "folder without #",
-            )
-        )
         for parameters, error in cases:
             self.run_algorithm("addheightaboveground", parameters, error=error)
-        # A COPC index supports layer expressions without launching background indexing.
-        import pdal
-
+        punctuation_output = self.root / "output#folder" / "hag.las"
+        result = self.run_algorithm(
+            "addheightaboveground",
+            {"INPUT": str(source), "OUTPUT": str(punctuation_output)},
+        )
+        self.assertTrue(Path(result["OUTPUT"]).is_file())
+        np.testing.assert_array_equal(
+            self.read_cloud(result["OUTPUT"])["HeightAboveGround"],
+            self.read_cloud(source)["Z"] - 100,
+        )
+        # A COPC index supports layer expressions without background indexing.
         copc_path = self.root / "indexed.copc.laz"
-        pdal.Pipeline(
-            json.dumps(
-                [
-                    str(source),
-                    {
-                        "type": "writers.copc",
-                        "filename": str(copc_path),
-                        "forward": "all",
-                        "extra_dims": "all",
-                    },
-                ]
-            )
-        ).execute()
+        self.native_algorithm(
+            "pdal:convertformat", {"INPUT": str(source), "OUTPUT": str(copc_path)}
+        )
         indexed = QgsPointCloudLayer(str(copc_path), "Indexed", "copc")
         self.assertTrue(indexed.isValid())
         self.project.addMapLayer(indexed)
@@ -499,8 +622,6 @@ class QgisRuntimeTests(unittest.TestCase):
             "addheightaboveground", {"INPUT_LAYER": indexed, "OUTPUT": output}
         )
         original, actual = self.read_cloud(copc_path), self.read_cloud(result["OUTPUT"])
-        import numpy as np
-
         for name in original.dtype.names:
             np.testing.assert_array_equal(actual[name], original[name])
         np.testing.assert_array_equal(actual["HeightAboveGround"], actual["Z"] - 100)
@@ -513,7 +634,6 @@ class QgisRuntimeTests(unittest.TestCase):
 
     @runtime
     def test_missing_height_geographic_crs_and_transformed_extent(self):
-        import pdal
 
         source, _ = self.create_point_cloud()
         self.run_algorithm(
@@ -522,23 +642,10 @@ class QgisRuntimeTests(unittest.TestCase):
             error="HeightAboveGround",
         )
         geographic = self.root / "geographic.las"
-        pdal.Pipeline(
-            json.dumps(
-                [
-                    str(source),
-                    {"type": "filters.reprojection", "out_srs": "EPSG:4326"},
-                    {
-                        "type": "writers.las",
-                        "filename": str(geographic),
-                        "a_srs": "EPSG:4326",
-                        "scale_x": 1e-9,
-                        "scale_y": 1e-9,
-                        "offset_x": "auto",
-                        "offset_y": "auto",
-                    },
-                ]
-            )
-        ).execute()
+        self.native_algorithm(
+            "pdal:reproject",
+            {"INPUT": str(source), "CRS": "EPSG:4326", "OUTPUT": str(geographic)},
+        )
         self.run_algorithm(
             "addheightaboveground",
             {"INPUT": str(geographic), "OUTPUT": str(self.root / "geo_hag.las")},
@@ -815,6 +922,136 @@ class QgisRuntimeTests(unittest.TestCase):
                     raster.bounds.left, 500000 + index * 0.1, places=8
                 )
                 self.assertEqual(raster.read(1).item(), 5.0)
+
+    @runtime
+    def test_ept_fractional_tile_boundary_belongs_to_next_cell(self):
+        import numpy as np
+        import rasterio
+
+        # 3 * .1 is greater than .3 in binary floating point. Test actual EPT
+        # reads as well as binning, so a rounded reader bound cannot lose the
+        # boundary return before the metric adapter sees it.
+        points = np.array(
+            [
+                (500000.1, 4100000.1, 101.0, 1.0),
+                (500000.3, 4100000.1, 103.0, 3.0),
+                (500000.6, 4100000.3, 106.0, 6.0),
+            ],
+            dtype=[
+                ("X", "<f8"),
+                ("Y", "<f8"),
+                ("Z", "<f8"),
+                ("HeightAboveGround", "<f8"),
+            ],
+        )
+        source = self.create_ept(points)
+        result = self.run_algorithm(
+            "processepttiles",
+            {
+                "EPT_INPUT": str(source),
+                "BOUNDS": "500000.05,500000.6,4100000.05,4100000.3 [EPSG:32610]",
+                "TILE_WIDTH": 0.3,
+                "TILE_HEIGHT": 0.3,
+                "VOXEL_XY": 0.1,
+                "BUFFER_FRACTION": 0,
+                "METRIC": 0,
+                "OUTPUT_FOLDER": str(self.root / "fractional_boundaries"),
+            },
+        )
+        paths = result["OUTPUT_FILES"].splitlines()
+        self.assertEqual(len(paths), 2)
+        with rasterio.open(paths[0]) as first, rasterio.open(paths[1]) as second:
+            left, right = first.read(1), second.read(1)
+            self.assertEqual(left.shape, (3, 3))
+            self.assertEqual(right.shape, (3, 3))
+            self.assertEqual(left[1, 1], 1)
+            self.assertEqual(right[1, 0], 3)
+            self.assertEqual(right[0, 2], 6)
+            self.assertEqual(np.isfinite(left).sum() + np.isfinite(right).sum(), 3)
+            self.assertAlmostEqual(second.bounds.left, 500000.3, places=8)
+
+    @runtime
+    def test_hag_reads_selected_source_instead_of_sibling_copc_cache(self):
+        import numpy as np
+        from pyforestscan_qgis.vendor import laspy
+
+        source, original = self.create_point_cloud("selected # source.las")
+        stale, _ = self.create_point_cloud("stale.las")
+        cloud = laspy.read(stale)
+        cloud.z = np.where(np.asarray(cloud.classification) == 2, 100.0, 110.0)
+        cloud.CustomAttribute = np.full(len(cloud.points), -3.0)
+        cloud.write(stale)
+        # QGIS prefers this sibling index automatically, even with index
+        # generation disabled. Its deliberately different canopy must be ignored.
+        temporary_cache = self.root / "stale-cache.copc.laz"
+        self.native_algorithm(
+            "pdal:convertformat", {"INPUT": str(stale), "OUTPUT": str(temporary_cache)}
+        )
+        cache = source.with_suffix(".copc.laz")
+        temporary_cache.rename(cache)
+        hashes = {
+            path: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in (source, cache)
+        }
+        result = self.run_algorithm(
+            "addheightaboveground",
+            {
+                "INPUT_LAYER": self.load_cloud(source),
+                "HAG_METHOD": 0,
+                "OUTPUT": str(self.root / "actual-source-hag.las"),
+            },
+        )
+        result_points = self.read_cloud(result["OUTPUT"])
+        for field in original.dtype.names:
+            np.testing.assert_array_equal(
+                result_points[field], original[field], err_msg=field
+            )
+        np.testing.assert_array_equal(
+            result_points["HeightAboveGround"], original["Z"] - 100
+        )
+        for path, checksum in hashes.items():
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), checksum)
+
+    @runtime
+    def test_hag_rejects_declared_terrain_feet_and_nonmetre_cloud_crs(self):
+        from osgeo import gdal
+        from pyforestscan_qgis.vendor import laspy
+
+        source, _ = self.create_point_cloud()
+        terrain = self.create_dtm("terrain-feet.tif")
+        dataset = gdal.Open(str(terrain), gdal.GA_Update)
+        dataset.GetRasterBand(1).SetUnitType("ft")
+        dataset = None
+        output = self.root / "invalid-units.las"
+        self.run_algorithm(
+            "addheightaboveground",
+            {
+                "INPUT": str(source),
+                "HAG_METHOD": 1,
+                "DTM": str(terrain),
+                "OUTPUT": str(output),
+            },
+            error="Convert terrain elevations to metres",
+        )
+        self.assertFalse(output.exists())
+
+        cloud = laspy.read(source)
+        cloud.header.vlrs[:] = [
+            vlr for vlr in cloud.header.vlrs if vlr.record_id != 2112
+        ]
+        cloud.header.vlrs.append(
+            laspy.vlrs.known.WktCoordinateSystemVlr(
+                QgsCoordinateReferenceSystem("EPSG:2227").toWkt()
+            )
+        )
+        feet_source = self.root / "cloud-feet.las"
+        cloud.write(feet_source)
+        self.run_algorithm(
+            "addheightaboveground",
+            {"INPUT": str(feet_source), "HAG_METHOD": 0, "OUTPUT": str(output)},
+            error="projected CRS in metres",
+        )
+        self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":

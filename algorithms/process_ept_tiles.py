@@ -23,7 +23,7 @@ from .common import (
     ensure_output_folder,
     help_url,
     protect_input_paths,
-    raise_for_missing_dependencies,
+    ensure_backend,
     require_metric_crs,
 )
 from .point_cloud import (
@@ -127,9 +127,15 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
         )
 
     def prepareAlgorithm(self, parameters, context, feedback):
-        raise_for_missing_dependencies(QgsProcessingException)
+        self._backend = ensure_backend("tiles", parameters, context, self, feedback)
         self._prepared = prepare_point_cloud(
-            self, parameters, context, feedback, input_name="EPT_INPUT", crs_name="SRS"
+            self,
+            parameters,
+            context,
+            feedback,
+            input_name="EPT_INPUT",
+            crs_name="SRS",
+            backend=self._backend,
         )
         if self._prepared.reader["type"] != "readers.ept":
             raise QgsProcessingException(
@@ -139,9 +145,50 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
         return True
 
     def processAlgorithm(self, parameters, context, feedback):
+        if self._backend == "engine":
+            from dataclasses import asdict
+            from ..runtime.client import call_engine
+
+            folder = self.parameterAsString(parameters, "OUTPUT_FOLDER", context)
+            options = {
+                key: self.parameterAsDouble(parameters, key, context)
+                for key in (
+                    "VOXEL_XY",
+                    "VOXEL_Z",
+                    "TILE_WIDTH",
+                    "TILE_HEIGHT",
+                    "BUFFER_FRACTION",
+                    "MIN_HEIGHT",
+                    "FHD_MIN_HEIGHT",
+                    "COVER_MIN_HEIGHT",
+                    "COVER_K",
+                )
+            }
+            options["METRIC"] = self.parameterAsEnum(parameters, "METRIC", context)
+            for key in ("REMOVE_OUTLIERS", "OVERWRITE"):
+                options[key] = self.parameterAsBool(parameters, key, context)
+            result = call_engine(
+                "tiles",
+                {
+                    "prepared": asdict(self._prepared),
+                    "options": options,
+                    "folder": folder,
+                },
+                feedback,
+            )
+            created = result["files"]
+            if self.parameterAsBool(parameters, "LOAD_OUTPUTS", context):
+                for path in created:
+                    add_raster_to_load_on_completion(
+                        context, path, os.path.basename(path), "OUTPUT_LAYERS"
+                    )
+            return {
+                "OUTPUT_FOLDER": folder,
+                "OUTPUT_FILES": "\n".join(created),
+                "OUTPUT_LAYERS": created,
+            }
         import numpy as np
         from dataclasses import replace
-        from pyforestscan.utils import get_bounds_from_ept
         from .metric_engine import (
             compute_metrics,
             MetricResult,
@@ -178,7 +225,10 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
         if prepared.bounds:
             (xmin, xmax), (ymin, ymax) = prepared.bounds
         else:
-            xmin, xmax, ymin, ymax, _, _ = get_bounds_from_ept(prepared.path)
+            extent = prepared.info["bounds"]
+            xmin, xmax, ymin, ymax = (
+                extent[key] for key in ("minx", "maxx", "miny", "maxy")
+            )
         if (
             not all(math.isfinite(v) for v in (xmin, xmax, ymin, ymax))
             or xmax <= xmin
@@ -238,8 +288,14 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
             left, bottom = left_index * xy, bottom_index * xy
             right, top = right_index * xy, top_index * xy
             read_bounds = (
-                [left - buffer * width, right + buffer * width],
-                [bottom - buffer * height, top + buffer * height],
+                [
+                    math.nextafter(left - buffer * width, -math.inf),
+                    math.nextafter(right + buffer * width, math.inf),
+                ],
+                [
+                    math.nextafter(bottom - buffer * height, -math.inf),
+                    math.nextafter(top + buffer * height, math.inf),
+                ],
             )
             tile = with_point_cloud_bounds(prepared, read_bounds)
             if self.parameterAsBool(parameters, "REMOVE_OUTLIERS", context):
@@ -263,37 +319,36 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
                 ]
                 tile = replace(tile, filters=tuple(stages))
             feedback.pushInfo(f"Tile {index + 1}/{len(paths)} ({i}, {j})")
-            points = read_point_cloud(tile, feedback, allow_empty=True)
+            points = read_point_cloud(tile, feedback, allow_empty=True, context=context)
             if points.size:
-                # Every point belongs to one core tile; buffer points only inform HAG.
-                keep = (points["X"] >= max(left, xmin)) & (
-                    points["Y"] >= max(bottom, ymin)
-                )
-                keep &= (
-                    (points["X"] <= min(right, xmax))
-                    if i == nx - 1
-                    else (points["X"] < right)
-                )
-                keep &= (
-                    (points["Y"] <= min(top, ymax))
-                    if j == ny - 1
-                    else (points["Y"] < top)
+                # Use integer cell membership, not rounded floating tile edges.
+                # In particular, X=.3 belongs to cell3 for a .1m grid even if
+                # the computed tile boundary is .30000000000000004.
+                xcell = np.floor(np.nextafter(points["X"] / xy, np.inf))
+                ycell = np.floor(np.nextafter(points["Y"] / xy, np.inf))
+                xcell = np.minimum(xcell, x1 - 1)
+                ycell = np.minimum(ycell, y1 - 1)
+                # LAS scale/offset decoding can move an exact AOI edge by one
+                # float64 ULP. Retain that edge without a map-unit tolerance.
+                keep = (
+                    (points["X"] >= math.nextafter(xmin, -math.inf))
+                    & (points["X"] <= math.nextafter(xmax, math.inf))
+                    & (points["Y"] >= math.nextafter(ymin, -math.inf))
+                    & (points["Y"] <= math.nextafter(ymax, math.inf))
+                    & (xcell >= left_index)
+                    & (xcell < right_index)
+                    & (ycell >= bottom_index)
+                    & (ycell < top_index)
                 )
                 points = points[keep]
+                xcell, ycell = xcell[keep], ycell[keep]
             if points.size:
                 try:
-                    # Assign each point to the fixed global XY cell before asking
-                    # core to bin it. Core's last bin is closed at the observed
-                    # maximum; using cell centres prevents exact-edge points from
-                    # merging into the preceding cell on a per-tile basis.
+                    # The core's final histogram bin is closed. Centre positions
+                    # preserve global cell membership without changing heights.
                     points = points.copy()
-                    for axis, low, high in (
-                        ("X", left_index, right_index),
-                        ("Y", bottom_index, top_index),
-                    ):
-                        indices = np.floor(np.nextafter(points[axis] / xy, np.inf))
-                        indices = np.clip(indices, low, high - 1)
-                        points[axis] = (indices + 0.5) * xy
+                    points["X"] = (xcell + 0.5) * xy
+                    points["Y"] = (ycell + 0.5) * xy
                     # Core column maximum has the same globally anchored grid as PAD/PAI/FHD.
                     requested = "voxel statistic" if metric == "CHM" else metric
                     result = compute_metrics(

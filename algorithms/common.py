@@ -1,33 +1,14 @@
-"""Dependency diagnostics and Processing output helpers (no metric implementations)."""
+"""Runtime selection and Processing output helpers (no metric implementations)."""
 
 import importlib
-import math
 import os
-from importlib.metadata import PackageNotFoundError, version
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
-SUPPORTED_PYFORESTSCAN = "0.4.1"
-REQUIRED_MODULES = [
-    ("pyforestscan", "PyForestScan"),
-    ("pdal", "PDAL Python bindings"),
-    ("rasterio", "rasterio"),
-    ("geopandas", "geopandas"),
-    ("numpy", "NumPy"),
-    ("scipy", "SciPy"),
-    ("pyproj", "pyproj"),
-    ("shapely", "Shapely"),
-    ("pandas", "pandas"),
-    ("requests", "requests"),
-    ("matplotlib", "matplotlib"),
-    ("tqdm", "tqdm"),
-]
-RUNTIME_MODULES = [
-    ("pyforestscan.handlers", "PyForestScan handlers"),
-    ("pyforestscan.calculate", "PyForestScan metrics"),
-    ("pyforestscan.filters", "PyForestScan filters"),
-    ("pyforestscan.process", "PyForestScan tiled processing"),
-]
+from ..vendor import PYFORESTSCAN_VERSION
+
+SUPPORTED_PYFORESTSCAN = PYFORESTSCAN_VERSION
 
 
 @dataclass
@@ -39,56 +20,143 @@ class DependencyResult:
     error: str = ""
 
 
-def check_dependencies(include_runtime=True):
+def _version_tuple(value):
+    match = re.match(r"(\d+)\.(\d+)\.(\d+)", value)
+    return tuple(map(int, match.groups())) if match else ()
+
+
+def _native_results(kind="metrics", hag="none", outliers=False):
+    # Keep compiled dependencies supplied by QGIS. Never alter its sys.path or
+    # install/upgrade packages inside the application interpreter.
     results = []
-    for module, label in REQUIRED_MODULES + (
-        RUNTIME_MODULES if include_runtime else []
-    ):
+    modules = [
+        ("numpy", "NumPy", (2, 3, 1)),
+        ("osgeo.gdal", "GDAL Python bindings", ()),
+    ]
+    if kind != "hag":
+        modules.append(("scipy", "SciPy", (1, 16, 0)))
+    for module, label, minimum in modules:
         try:
             imported = importlib.import_module(module)
-            module_version = str(getattr(imported, "__version__", ""))
-            if module == "pyforestscan":
-                try:
-                    module_version = version("pyforestscan")
-                except PackageNotFoundError:
-                    module_version = "unknown"
-                if module_version != SUPPORTED_PYFORESTSCAN:
-                    raise ImportError(
-                        f"Found PyForestScan {module_version}; this release requires "
-                        f"{SUPPORTED_PYFORESTSCAN}. Install the supplied environment.yml."
-                    )
-            results.append(DependencyResult(module, label, True, module_version))
+            value = str(getattr(imported, "__version__", ""))
+            if minimum and _version_tuple(value) < minimum:
+                raise ImportError(
+                    f"Found {value or 'unknown'}; need {'.'.join(map(str, minimum))} or later."
+                )
+            results.append(DependencyResult(module, label, True, value))
         except Exception as exc:
+            results.append(DependencyResult(module, label, False, error=str(exc)))
+    if kind != "rumple":
+        from qgis.core import Qgis, QgsApplication
+
+        if Qgis.QGIS_VERSION_INT < 40200:
             results.append(
                 DependencyResult(
-                    module,
-                    label,
+                    "native-point-cloud-version",
+                    "Native point-cloud export",
                     False,
-                    error=f"{type(exc).__name__}: {exc}".replace("\n", " "),
+                    error="Native processing requires QGIS 4.2 or later to preserve point attributes reliably. Use the isolated engine on older versions.",
                 )
             )
+        registry = QgsApplication.processingRegistry()
+        if registry.providerById("pdal") is None:
+            try:
+                from qgis.analysis import QgsPdalAlgorithms
+
+                registry.addProvider(QgsPdalAlgorithms())
+            except (ImportError, RuntimeError):
+                pass
+        ids = ["pdal:convertformat", "pdal:filter", "pdal:clip"]
+        if hag == "delaunay":
+            ids.append("pdal:heightabovegroundtriangulation")
+        for algorithm_id in ids:
+            present = registry.algorithmById(algorithm_id) is not None
+            results.append(
+                DependencyResult(
+                    algorithm_id,
+                    algorithm_id,
+                    present,
+                    error="Not provided by this QGIS installation."
+                    if not present
+                    else "",
+                )
+            )
+        if outliers:
+            results.append(
+                DependencyResult(
+                    "tiled-outliers",
+                    "Tiled statistical outlier cleaning",
+                    False,
+                    error="This advanced option uses the isolated processing engine.",
+                )
+            )
+    results.append(
+        DependencyResult(
+            "bundled.pyforestscan", "Bundled PyForestScan", True, PYFORESTSCAN_VERSION
+        )
+    )
     return results
 
 
+def check_dependencies(include_runtime=True):
+    """Report the native metric workflow; other features are checked when selected."""
+    return _native_results(hag="delaunay" if include_runtime else "none")
+
+
 def dependency_report(results):
-    lines = []
-    for result in results:
-        if result.ok:
-            suffix = f" ({result.version})" if result.version else ""
-            lines.append(f"OK: {result.label} [{result.module}]{suffix}")
-        else:
-            lines.append(f"FAIL: {result.label} [{result.module}] - {result.error}")
-    return "\n".join(lines)
+    return "\n".join(
+        f"OK: {item.label} [{item.module}]"
+        + (f" ({item.version})" if item.version else "")
+        if item.ok
+        else f"FAIL: {item.label} [{item.module}] - {item.error}"
+        for item in results
+    )
 
 
-def raise_for_missing_dependencies(qgs_exception_cls):
-    results = check_dependencies()
-    if any(not result.ok for result in results):
-        raise qgs_exception_cls(
-            "PyForestScan runtime dependencies are missing or incompatible in QGIS's Python. "
-            "Run Check PyForestScan Dependencies and follow the bundled installation guide.\n\n"
-            + dependency_report(results)
+def ensure_backend(kind, parameters, context, algorithm, feedback):
+    """Choose a capable native installation, then an explicitly installed engine."""
+    from qgis.core import QgsProcessingException, QgsSettings
+    from ..runtime.manager import status
+
+    method = (
+        algorithm.parameterAsEnum(parameters, "HAG_METHOD", context)
+        if kind != "rumple"
+        else 0
+    )
+    hag = (
+        ["delaunay", "dtm"][method]
+        if kind == "hag"
+        else ["none", "delaunay", "dtm"][method]
+    )
+    outliers = kind == "tiles" and algorithm.parameterAsBool(
+        parameters, "REMOVE_OUTLIERS", context
+    )
+    forced = os.environ.get(
+        "PYFORESTSCAN_BACKEND",
+        QgsSettings().value("pyforestscan/backend", "auto", type=str),
+    )
+    if forced not in ("auto", "native", "engine"):
+        raise QgsProcessingException(
+            "PYFORESTSCAN_BACKEND must be auto, native, or engine."
         )
+    results = _native_results(kind, hag, outliers) if forced != "engine" else []
+    if forced != "engine" and all(item.ok for item in results):
+        feedback.pushInfo(
+            "Using QGIS native point-cloud tools and bundled PyForestScan calculations."
+        )
+        return "native"
+    engine = status()
+    if forced != "native" and engine.get("installed"):
+        feedback.pushInfo("Using the isolated PyForestScan processing engine.")
+        return "engine"
+    reason = dependency_report([item for item in results if not item.ok])
+    raise QgsProcessingException(
+        "This workflow needs the isolated PyForestScan engine on this installation. "
+        "Open Plugins → PyForestScan → Set up PyForestScan to install or repair it. "
+        "Your QGIS Python environment will not be changed.\n"
+        + reason
+        + ("\n" + str(engine["error"]) if engine.get("error") else "")
+    )
 
 
 def help_url(anchor):
@@ -101,24 +169,28 @@ def help_url(anchor):
 
 def require_metric_crs(crs):
     from qgis.core import Qgis, QgsProcessingException
-    from pyproj import CRS
 
+    horizontal = crs.horizontalCrs() if hasattr(crs, "horizontalCrs") else crs
+    if not horizontal.isValid():
+        horizontal = crs
     if (
         not crs.isValid()
-        or crs.isGeographic()
-        or crs.mapUnits() != Qgis.DistanceUnit.Meters
+        or horizontal.isGeographic()
+        or horizontal.mapUnits() != Qgis.DistanceUnit.Meters
     ):
         raise QgsProcessingException(
             "Forest metrics require a projected CRS in metres and Z/HeightAboveGround in metres. "
             "Reproject the point cloud with QGIS first; changing the project CRS does not reproject points."
         )
-    for axis in CRS.from_wkt(crs.toWkt()).axis_info:
-        if axis.direction in ("up", "down") and not math.isclose(
-            axis.unit_conversion_factor, 1.0
-        ):
-            raise QgsProcessingException(
-                "The point cloud's declared vertical CRS is not in metres. Convert vertical units before calculating forest metrics."
-            )
+    vertical = crs.verticalCrs() if hasattr(crs, "verticalCrs") else None
+    if (
+        vertical is not None
+        and vertical.isValid()
+        and vertical.mapUnits() != Qgis.DistanceUnit.Meters
+    ):
+        raise QgsProcessingException(
+            "The point cloud's declared vertical CRS is not in metres. Convert vertical units before calculating forest metrics."
+        )
 
 
 def protect_input_paths(outputs, inputs):

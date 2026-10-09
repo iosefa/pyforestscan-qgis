@@ -20,7 +20,7 @@ from .common import (
     check_canceled,
     help_url,
     protect_input_paths,
-    raise_for_missing_dependencies,
+    ensure_backend,
     require_metric_crs,
 )
 
@@ -77,7 +77,7 @@ class RumpleIndexAlgorithm(QgsProcessingAlgorithm):
         self.addOutput(QgsProcessingOutputNumber("RUMPLE", "Rumple index"))
 
     def prepareAlgorithm(self, parameters, context, feedback):
-        raise_for_missing_dependencies(QgsProcessingException)
+        self._backend = ensure_backend("rumple", parameters, context, self, feedback)
         layer = self.parameterAsRasterLayer(parameters, "INPUT", context)
         if layer is None or not layer.isValid():
             raise QgsProcessingException("Choose a valid canopy height raster.")
@@ -99,52 +99,80 @@ class RumpleIndexAlgorithm(QgsProcessingAlgorithm):
         return True
 
     def processAlgorithm(self, parameters, context, feedback):
-        import numpy as np
-        import rasterio
-        from pyforestscan.calculate import calculate_rumple
-        from pyproj import CRS
-
         output = self.parameterAsFileOutput(parameters, "OUTPUT", context)
         protect_input_paths([output], [self._source])
         check_canceled(feedback)
-        try:
-            with rasterio.open(self._source) as raster:
-                if raster.crs is None or not CRS(raster.crs).equals(
-                    CRS(self._crs), ignore_axis_order=True
-                ):
-                    raise QgsProcessingException(
-                        "The layer CRS differs from its stored raster CRS; reproject the raster first."
-                    )
-                if (
-                    raster.transform.b != 0
-                    or raster.transform.d != 0
-                    or raster.transform.a <= 0
-                    or raster.transform.e >= 0
-                ):
-                    raise QgsProcessingException(
-                        "Use a north-up CHM raster; warp rotated rasters with QGIS first."
-                    )
-                if raster.width * raster.height > 20_000_000:
-                    raise QgsProcessingException(
-                        "The CHM is too large for an in-memory rumple calculation. Clip it to the study area first."
-                    )
-                chm = (
-                    raster.read(
-                        self.parameterAsInt(parameters, "BAND", context), masked=True
-                    )
-                    .astype(float)
-                    .filled(np.nan)
-                    .T
-                )
-                resolution = (abs(raster.transform.a), abs(raster.transform.e))
-            minimum = (
-                self.parameterAsDouble(parameters, "MIN_HEIGHT", context)
-                if parameters.get("MIN_HEIGHT") is not None
-                else None
+        band_number = self.parameterAsInt(parameters, "BAND", context)
+        minimum = (
+            self.parameterAsDouble(parameters, "MIN_HEIGHT", context)
+            if parameters.get("MIN_HEIGHT") is not None
+            else None
+        )
+        if self._backend == "engine":
+            from ..runtime.client import call_engine
+
+            result = call_engine(
+                "rumple",
+                {
+                    "source": self._source,
+                    "band": band_number,
+                    "min_height": minimum,
+                    "output": output,
+                    "crs_wkt": self._crs,
+                },
+                feedback,
             )
+            return {"OUTPUT": output, "RUMPLE": result["rumple"]}
+        import numpy as np
+        from osgeo import gdal, osr
+        from ..vendor.pyforestscan.calculate import calculate_rumple
+
+        raster = None
+        try:
+            raster = gdal.Open(self._source, gdal.GA_ReadOnly)
+            if raster is None:
+                raise ValueError("Could not read the canopy height raster.")
+            stored, expected = osr.SpatialReference(), osr.SpatialReference()
+            if (
+                not raster.GetProjection()
+                or stored.ImportFromWkt(raster.GetProjection()) != 0
+            ):
+                raise ValueError("The canopy height raster has no stored CRS.")
+            expected.ImportFromWkt(self._crs)
+            for crs in (stored, expected):
+                crs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+            if not stored.IsSame(expected):
+                raise ValueError(
+                    "The layer CRS differs from its stored raster CRS; reproject the raster first."
+                )
+            transform = raster.GetGeoTransform()
+            if (
+                transform[2] != 0
+                or transform[4] != 0
+                or transform[1] <= 0
+                or transform[5] >= 0
+            ):
+                raise ValueError(
+                    "Use a north-up CHM raster; warp rotated rasters with QGIS first."
+                )
+            if raster.RasterXSize * raster.RasterYSize > 20_000_000:
+                raise ValueError(
+                    "The CHM is too large for an in-memory rumple calculation. Clip it to the study area first."
+                )
+            if not 1 <= band_number <= raster.RasterCount:
+                raise ValueError("Choose an existing height band.")
+            band = raster.GetRasterBand(band_number)
+            values, mask = band.ReadAsArray(), band.GetMaskBand().ReadAsArray()
+            if values is None or mask is None:
+                raise ValueError("Could not read the canopy height band.")
+            chm = values.astype(float)
+            chm[mask == 0] = np.nan
+            chm = chm.T
+            resolution = (abs(transform[1]), abs(transform[5]))
+            band = raster = None
             value = float(calculate_rumple(chm, resolution, min_height=minimum))
             if not math.isfinite(value):
-                raise QgsProcessingException(
+                raise ValueError(
                     "No valid 2 × 2 canopy surface patches remain; enlarge the area or lower the height threshold."
                 )
             check_canceled(feedback)
@@ -153,6 +181,8 @@ class RumpleIndexAlgorithm(QgsProcessingAlgorithm):
             return {"OUTPUT": output, "RUMPLE": value}
         except (ValueError, RuntimeError, IndexError) as exc:
             raise QgsProcessingException(f"Rumple calculation failed: {exc}") from exc
+        finally:
+            raster = None
 
     def createInstance(self):
         return RumpleIndexAlgorithm()

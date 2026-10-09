@@ -1,8 +1,8 @@
 [general]
 name=PyForestScan
 description=QGIS Processing wrappers for PyForestScan LiDAR forest structure metrics.
-about=Forest structure metrics and persistent HeightAboveGround from loaded point cloud layers, LAS/LAZ/COPC files, and EPT datasets in the Processing Toolbox.
-version=0.2.0
+about=Forest structure metrics and persistent HeightAboveGround in the Processing Toolbox. Uses native QGIS tools and bundled pure-Python calculations. Installations missing required capabilities can download an optional isolated processing engine through Plugins > PyForestScan > Set up PyForestScan; internet access and additional disk space are required for that setup.
+version=0.3.0
 qgisMinimumVersion=3.40
 qgisMaximumVersion=4.99
 author=Nicholas Rogers, Joseph Percival

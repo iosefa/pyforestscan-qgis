@@ -1,10 +1,10 @@
 """Persist height above ground as an extra dimension in a new LAS/LAZ layer."""
 
-import json
+from dataclasses import asdict
 import os
-import tempfile
 
 from qgis.core import (
+    QgsCoordinateReferenceSystem,
     QgsProcessingAlgorithm,
     QgsProcessingException,
     QgsProcessingParameterEnum,
@@ -12,11 +12,10 @@ from qgis.core import (
     QgsProcessingParameterRasterLayer,
 )
 
-from .common import help_url, protect_input_paths, raise_for_missing_dependencies
+from .common import help_url, protect_input_paths, require_metric_crs
 from .point_cloud import (
     add_point_cloud_parameters,
     prepare_point_cloud,
-    validate_points,
 )
 
 
@@ -54,8 +53,8 @@ class AddHeightAboveGroundAlgorithm(QgsProcessingAlgorithm):
             "<p><b>Delaunay</b> uses ground points classified as 2; at least three ground points "
             "that are not on one line are required. <b>DTM</b> uses band 1 of a local terrain "
             "raster in the point cloud's CRS. The terrain raster must cover the processed points "
-            "without NoData. Point Z and terrain elevations must use the same units and vertical datum.</p>"
-            "<p>Use a projected CRS. Bounds and crop polygons are transformed to the point cloud CRS. "
+            "without NoData. Point Z and terrain elevations must be in metres and use the same vertical datum.</p>"
+            "<p>Use a projected CRS in metres. Bounds and crop polygons are transformed to the point cloud CRS. "
             "Crop limits also limit the ground points available for interpolation. Save pending "
             "point cloud edits and export any layer filter before running. This tool processes "
             "full-resolution points in memory; choose a manageable area for large remote datasets.</p>"
@@ -63,7 +62,7 @@ class AddHeightAboveGroundAlgorithm(QgsProcessingAlgorithm):
             "Keep <i>Open output file after running algorithm</i> enabled to add the result to Layers. "
             "QGIS may then index the output. Select HeightAboveGround in the layer's attribute "
             "symbology, or use the result in the forest structure tools. Cancel is checked between "
-            "PDAL operations; an active PDAL operation must finish first.</p>"
+            "backend operations. Native QGIS jobs receive cancellation requests.</p>"
         )
 
     def initAlgorithm(self, config=None):
@@ -88,22 +87,23 @@ class AddHeightAboveGroundAlgorithm(QgsProcessingAlgorithm):
         )
 
     def prepareAlgorithm(self, parameters, context, feedback):
-        raise_for_missing_dependencies(QgsProcessingException)
+        from .common import ensure_backend
+
+        backend = ensure_backend("hag", parameters, context, self, feedback)
         self._prepared = prepare_point_cloud(
             self,
             parameters,
             context,
             feedback,
+            backend=backend,
             hag_method=self.HAG_OPTIONS[
                 self.parameterAsEnum(parameters, self.HAG_METHOD, context)
             ],
         )
+        require_metric_crs(QgsCoordinateReferenceSystem(self._prepared.crs_wkt))
         return True
 
     def processAlgorithm(self, parameters, context, feedback):
-        import numpy as np
-        import pdal
-
         prepared = self._prepared
         output = self.parameterAsOutputLayer(parameters, self.OUTPUT, context)
         lower = output.lower()
@@ -126,60 +126,27 @@ class AddHeightAboveGroundAlgorithm(QgsProcessingAlgorithm):
         protect_input_paths([output], [prepared.dtm_path])
         if feedback.isCanceled():
             return {}
-        directory = os.path.dirname(os.path.abspath(output))
-        if "#" in directory:
-            raise QgsProcessingException(
-                "PDAL treats # in output folder names as a filename placeholder. "
-                "Choose an output folder without #."
-            )
-        os.makedirs(directory, exist_ok=True)
-        descriptor, temporary = tempfile.mkstemp(
-            prefix=".pyforestscan-hag-",
-            suffix=os.path.splitext(output)[1],
-            dir=directory,
-        )
-        os.close(descriptor)
-        writer = {
-            "type": "writers.las",
-            "filename": temporary,
-            "minor_version": 4,
-            "forward": "all",
-            "extra_dims": "all",
-            "compression": lower.endswith(".laz"),
-            "a_srs": prepared.crs_wkt,
-        }
-        if prepared.reader["type"] == "readers.ept":
-            # EPT has no LAS header to forward. Use auto scales to preserve as much
-            # coordinate precision as fits in LAS's signed 32-bit coordinate integers.
-            writer.update({f"scale_{axis}": "auto" for axis in "xyz"})
-            writer.update({f"offset_{axis}": "auto" for axis in "xyz"})
         try:
-            feedback.pushInfo(
-                "Calculating HeightAboveGround and writing a new point cloud."
-            )
-            pipeline = pdal.Pipeline(json.dumps(prepared.stages + [writer]))
-            count = pipeline.execute()
-            arrays = pipeline.arrays
-            if not arrays or not count:
-                raise QgsProcessingException(
-                    "No points were returned for the selected source and crop."
+            if prepared.backend == "native":
+                from .native_cloud import write_native_hag
+
+                result = write_native_hag(prepared, output, context, feedback)
+            else:
+                from ..runtime.client import call_engine
+
+                result = call_engine(
+                    "hag",
+                    {"prepared": asdict(prepared), "output": output},
+                    feedback=feedback,
                 )
-            points = arrays[0] if len(arrays) == 1 else np.concatenate(arrays)
-            validate_points(points, prepared)
-            if feedback.isCanceled():
-                return {}
-            os.replace(temporary, output)
             feedback.pushInfo(
-                f"Wrote {count:,} points with HeightAboveGround. Original Z elevations were retained."
+                f"Wrote {result.get('count', 0):,} points with HeightAboveGround. Original Z elevations were retained."
             )
-            return {self.OUTPUT: output}
-        except RuntimeError as exc:
+            return {self.OUTPUT: result.get("output", output)}
+        except (RuntimeError, ValueError, OSError) as exc:
             raise QgsProcessingException(
                 f"Height above ground processing failed: {exc}"
             ) from exc
-        finally:
-            if os.path.exists(temporary):
-                os.remove(temporary)
 
     def createInstance(self):
         return AddHeightAboveGroundAlgorithm()
