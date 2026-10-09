@@ -3,7 +3,7 @@ from qgis.core import (
     QgsProcessingOutputString,
 )
 
-from .common import check_dependencies, dependency_report
+from .common import check_dependencies, dependency_report, help_url
 
 
 class DependencyCheckAlgorithm(QgsProcessingAlgorithm):
@@ -16,10 +16,13 @@ class DependencyCheckAlgorithm(QgsProcessingAlgorithm):
         return "Check PyForestScan Dependencies"
 
     def group(self):
-        return "PyForestScan"
+        return "Diagnostics"
 
     def groupId(self):
-        return "pyforestscan"
+        return "diagnostics"
+
+    def helpUrl(self):
+        return help_url(self.name())
 
     def shortHelpString(self):
         return (

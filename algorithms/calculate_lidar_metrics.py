@@ -1,416 +1,341 @@
+"""Processing Toolbox entry points sharing the same released PyForestScan backend."""
+
 import csv
-import math
 import os
+from pathlib import Path
+import tempfile
 
 from qgis.core import (
-    QgsProcessing,
+    Qgis,
+    QgsCoordinateReferenceSystem,
     QgsProcessingAlgorithm,
     QgsProcessingException,
+    QgsProcessingOutputFile,
+    QgsProcessingOutputNumber,
+    QgsProcessingOutputRasterLayer,
     QgsProcessingOutputString,
-    QgsProcessingParameterCrs,
+    QgsProcessingParameterBoolean,
     QgsProcessingParameterEnum,
-    QgsProcessingParameterExtent,
-    QgsProcessingParameterFeatureSource,
     QgsProcessingParameterFolderDestination,
     QgsProcessingParameterNumber,
-    QgsProcessingParameterRasterLayer,
+    QgsProcessingParameterRasterDestination,
     QgsProcessingParameterString,
 )
 
 from .common import (
     add_raster_to_load_on_completion,
-    calculate_canopy_cover,
-    calculate_point_density,
-    calculate_rumple,
+    check_canceled,
     ensure_output_folder,
-    extent_to_ept_bounds,
-    first_point_array,
-    import_metric_runtime,
-    interpolation_value,
-    qgis_crs_to_string,
+    help_url,
+    protect_input_paths,
     raise_for_missing_dependencies,
-    raster_layer_path,
-    require_height_above_ground,
-    safe_filename,
+    require_metric_crs,
 )
+from .point_cloud import (
+    add_point_cloud_parameters,
+    prepare_point_cloud,
+    read_point_cloud,
+)
+
+METRIC_INFO = {
+    "CHM": ("canopyheightmodel", "Canopy Height Model", "chm", "CHM"),
+    "PAD": ("plantareadensity", "Plant Area Density", "pad", "PAD"),
+    "PAI": ("plantareaindex", "Plant Area Index", "pai", "PAI"),
+    "FHD": ("foliageheightdiversity", "Foliage Height Diversity", "fhd", "FHD"),
+    "canopy cover": ("canopycover", "Canopy Cover", "canopy_cover", "CANOPY_COVER"),
+    "point density": (
+        "pointdensity",
+        "Point Density",
+        "point_density",
+        "POINT_DENSITY",
+    ),
+    "rumple": ("rumpleindex", "Rumple Index", "rumple", "RUMPLE"),
+    "voxel statistic": (
+        "voxelstatistics",
+        "Forest Voxel Statistics",
+        "voxel_statistic",
+        "VOXEL_STATISTIC",
+    ),
+}
+METRIC_HELP = {
+    "CHM": "Maximum HeightAboveGround in each XY cell, in metres. Empty cells remain NoData. Gap filling is left to QGIS raster tools.",
+    "PAD": "Plant area density in inverse metres. The output is a multiband GeoTIFF: band 1 is the lowest height bin, with height ranges in band descriptions. Ground, undefined bins, and empty columns are NoData; a sampled bin with no estimated foliage may be zero.",
+    "PAI": "Plant area index is the vertical integral of PAD above the minimum height, with vertical bin size included. Output is dimensionless; unsampled columns remain NoData.",
+    "FHD": "Shannon entropy of return proportions across height bins above the selected minimum height, in natural-log units. Empty columns are NoData.",
+    "canopy cover": "PAD-derived canopy cover: 1 − exp(−k × PAI above the height threshold). Values are fractions from 0 to 1, not percentages or a raw above-height return ratio.",
+    "point density": "Number of nonnegative HeightAboveGround returns per square metre in each voxel column. Native QGIS tools also provide density without requiring HeightAboveGround.",
+    "rumple": "Ratio of CHM surface area to its projected ground area. A flat valid canopy has value 1. The standalone Rumple Index tool accepts a CHM raster.",
+    "voxel statistic": "A column statistic for a point-cloud dimension over the height-normalized voxel grid. Available statistics: mean, sum, count, minimum, maximum, median, standard deviation.",
+}
+
+
+def write_rumple_report(path, value):
+    directory = Path(path).absolute().parent
+    directory.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=".pyforestscan-rumple-", suffix=".csv", dir=directory
+    )
+    try:
+        with os.fdopen(descriptor, "w", newline="", encoding="utf-8") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(["metric", "value"])
+            writer.writerow(["rumple", value])
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
 
 
 class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
-    INPUT = "INPUT"
-    INPUT_CRS = "INPUT_CRS"
-    BOUNDS = "BOUNDS"
-    POLYGON = "POLYGON"
-    DTM = "DTM"
-    HAG_METHOD = "HAG_METHOD"
-    VOXEL_XY = "VOXEL_XY"
-    VOXEL_Z = "VOXEL_Z"
-    METRICS = "METRICS"
-    INTERPOLATION = "INTERPOLATION"
-    MIN_HEIGHT = "MIN_HEIGHT"
-    COVER_MIN_HEIGHT = "COVER_MIN_HEIGHT"
-    COVER_K = "COVER_K"
-    OUTPUT_FOLDER = "OUTPUT_FOLDER"
-    OUTPUT_FILES = "OUTPUT_FILES"
-    RUMPLE_REPORT = "RUMPLE_REPORT"
+    """Batch metrics; fixed-metric instances expose focused Toolbox tools."""
 
-    HAG_OPTIONS = ["none", "delaunay", "dtm"]
-    METRIC_OPTIONS = [
-        "CHM",
-        "PAD",
-        "PAI",
-        "FHD",
-        "canopy cover",
-        "point density",
-        "rumple",
-    ]
-    INTERPOLATION_OPTIONS = ["none", "linear", "nearest", "cubic"]
+    METRIC_OPTIONS = list(METRIC_INFO)
+    STAT_OPTIONS = ["mean", "sum", "count", "min", "max", "median", "std"]
+
+    def __init__(self, metric=None):
+        super().__init__()
+        self.metric = metric
+        self._prepared = None
 
     def name(self):
-        return "calculatelidarmetrics"
+        return METRIC_INFO[self.metric][0] if self.metric else "calculatelidarmetrics"
 
     def displayName(self):
-        return "Calculate LiDAR Metrics"
+        return (
+            METRIC_INFO[self.metric][1] if self.metric else "Calculate Forest Metrics"
+        )
 
     def group(self):
-        return "PyForestScan"
+        return "Forest structure"
 
     def groupId(self):
-        return "pyforestscan"
+        return "foreststructure"
+
+    def helpUrl(self):
+        return help_url(self.name())
 
     def shortHelpString(self):
+        specific = (
+            METRIC_HELP[self.metric]
+            if self.metric
+            else "Calculate several forest metrics together, sharing the point-cloud read and voxel grid. PAD is a multiband raster; rumple is a CSV report and numeric result."
+        )
         return (
-            "Calculates common PyForestScan forest structure metrics from a local "
-            "LAS/LAZ/COPC file, local EPT ept.json path, or remote EPT URL. Most height metrics require "
-            "HeightAboveGround; choose Delaunay or DTM HAG if the input does not "
-            "already provide it."
+            f"<p>{specific}</p>"
+            "<p>Select a loaded point cloud layer, or enter a LAS/LAZ/COPC path or EPT URL. "
+            "Use one input only. Full-resolution saved points are processed, independent of renderer styling. "
+            "Save pending edits and export layer filters first.</p>"
+            "<p>The source must use a projected CRS in metres, with Z and HeightAboveGround in metres. "
+            "The source CRS is read from its metadata; assigning a missing CRS does not reproject data. "
+            "Optional extents and crop polygons are transformed into the source CRS.</p>"
+            "<p>Use existing HeightAboveGround, or calculate it for this run using classified ground "
+            "(Delaunay) or a terrain raster in the same CRS and vertical datum. To retain the dimension "
+            "for reuse, run Add Height Above Ground first. Negative or nonfinite HeightAboveGround "
+            "values are excluded; invalid XYZ coordinates must be corrected. All height thresholds are in metres.</p>"
+            "<p>These tools read the selected area into memory. Reduce the area or increase grid size "
+            "for large clouds; use Process EPT Tiles for large EPT datasets. Cancellation is checked "
+            "between backend operations. See the bundled Help for formulas and output interpretation.</p>"
+        )
+
+    def _uses(self, *metrics):
+        return self.metric is None or self.metric in metrics
+
+    def _number(self, name, label, default, minimum=0.0):
+        self.addParameter(
+            QgsProcessingParameterNumber(
+                name,
+                label,
+                Qgis.ProcessingNumberParameterType.Double,
+                defaultValue=default,
+                minValue=minimum,
+            )
         )
 
     def initAlgorithm(self, config=None):
-        self.addParameter(
-            QgsProcessingParameterString(
-                self.INPUT,
-                "Input point cloud source",
+        add_point_cloud_parameters(self)
+        self._number("VOXEL_XY", "XY grid cell size (m)", 1.0, 0.000001)
+        if self._uses(
+            "PAD", "PAI", "FHD", "canopy cover", "point density", "voxel statistic"
+        ):
+            self._number("VOXEL_Z", "Height bin size (m)", 1.0, 0.000001)
+        if self.metric is None:
+            self.addParameter(
+                QgsProcessingParameterEnum(
+                    "METRICS",
+                    "Metrics",
+                    self.METRIC_OPTIONS,
+                    allowMultiple=True,
+                    defaultValue=[0, 2, 3, 4],
+                )
             )
-        )
-        self.addParameter(
-            QgsProcessingParameterCrs(
-                self.INPUT_CRS,
-                "Input CRS",
-                optional=True,
+        if self._uses("PAI"):
+            self._number("MIN_HEIGHT", "Minimum height for PAI (m)", 1.0)
+        if self._uses("FHD"):
+            self._number("FHD_MIN_HEIGHT", "Minimum height for FHD (m)", 0.0)
+        if self._uses("canopy cover"):
+            self._number("COVER_MIN_HEIGHT", "Minimum height for canopy cover (m)", 2.0)
+            self._number("COVER_K", "Canopy cover extinction coefficient", 0.5)
+        if self._uses("voxel statistic"):
+            self.addParameter(
+                QgsProcessingParameterString(
+                    "VOXEL_DIMENSION",
+                    "Dimension for voxel statistic",
+                    defaultValue="HeightAboveGround",
+                )
             )
-        )
-        self.addParameter(
-            QgsProcessingParameterExtent(
-                self.BOUNDS,
-                "Optional EPT bounds",
-                optional=True,
+            self.addParameter(
+                QgsProcessingParameterEnum(
+                    "VOXEL_STAT",
+                    "Voxel column statistic",
+                    self.STAT_OPTIONS,
+                    defaultValue=0,
+                )
             )
-        )
-        self.addParameter(
-            QgsProcessingParameterFeatureSource(
-                self.POLYGON,
-                "Optional crop polygon",
-                [QgsProcessing.SourceType.TypeVectorPolygon],
-                optional=True,
+        if self.metric:
+            self.addParameter(
+                QgsProcessingParameterRasterDestination("OUTPUT", self.displayName())
             )
-        )
-        self.addParameter(
-            QgsProcessingParameterRasterLayer(
-                self.DTM,
-                "Optional DTM raster for HAG",
-                optional=True,
+        else:
+            self.addParameter(
+                QgsProcessingParameterFolderDestination(
+                    "OUTPUT_FOLDER", "Output folder"
+                )
             )
-        )
-        self.addParameter(
-            QgsProcessingParameterEnum(
-                self.HAG_METHOD,
-                "HAG method",
-                self.HAG_OPTIONS,
-                defaultValue=0,
+            self.addParameter(
+                QgsProcessingParameterBoolean(
+                    "LOAD_OUTPUTS",
+                    "Load output rasters into the project",
+                    defaultValue=True,
+                )
             )
-        )
-        self.addParameter(
-            QgsProcessingParameterNumber(
-                self.VOXEL_XY,
-                "XY grid cell size",
-                QgsProcessingParameterNumber.Type.Double,
-                defaultValue=1.0,
-                minValue=0.000001,
+            self.addParameter(
+                QgsProcessingParameterBoolean(
+                    "OVERWRITE", "Overwrite existing metric files", defaultValue=False
+                )
             )
-        )
-        self.addParameter(
-            QgsProcessingParameterNumber(
-                self.VOXEL_Z,
-                "Height bin size",
-                QgsProcessingParameterNumber.Type.Double,
-                defaultValue=1.0,
-                minValue=0.000001,
-            )
-        )
-        self.addParameter(
-            QgsProcessingParameterEnum(
-                self.METRICS,
-                "Metrics",
-                self.METRIC_OPTIONS,
-                allowMultiple=True,
-                defaultValue=[0, 2, 3, 4, 5],
-            )
-        )
-        self.addParameter(
-            QgsProcessingParameterEnum(
-                self.INTERPOLATION,
-                "CHM interpolation",
-                self.INTERPOLATION_OPTIONS,
-                defaultValue=1,
-            )
-        )
-        self.addParameter(
-            QgsProcessingParameterNumber(
-                self.MIN_HEIGHT,
-                "Minimum height for PAI",
-                QgsProcessingParameterNumber.Type.Double,
-                defaultValue=1.0,
-                minValue=0.0,
-            )
-        )
-        self.addParameter(
-            QgsProcessingParameterNumber(
-                self.COVER_MIN_HEIGHT,
-                "Canopy cover minimum height",
-                QgsProcessingParameterNumber.Type.Double,
-                defaultValue=2.0,
-                minValue=0.0,
-            )
-        )
-        self.addParameter(
-            QgsProcessingParameterNumber(
-                self.COVER_K,
-                "Canopy cover gap-fraction exponent",
-                QgsProcessingParameterNumber.Type.Double,
-                defaultValue=0.5,
-                minValue=0.000001,
-            )
-        )
-        self.addParameter(
-            QgsProcessingParameterFolderDestination(
-                self.OUTPUT_FOLDER,
-                "Output folder",
-            )
-        )
-        self.addOutput(QgsProcessingOutputString(self.OUTPUT_FILES, "Created files"))
-        self.addOutput(QgsProcessingOutputString(self.RUMPLE_REPORT, "Rumple report"))
+            for metric, (_, label, _, key) in METRIC_INFO.items():
+                if metric != "rumple":
+                    self.addOutput(QgsProcessingOutputRasterLayer(key, label))
+            self.addOutput(QgsProcessingOutputFile("RUMPLE_REPORT", "Rumple report"))
+            self.addOutput(QgsProcessingOutputNumber("RUMPLE", "Rumple index"))
+            self.addOutput(QgsProcessingOutputString("OUTPUT_FILES", "Created files"))
+
+    def prepareAlgorithm(self, parameters, context, feedback):
+        raise_for_missing_dependencies(QgsProcessingException)
+        self._prepared = prepare_point_cloud(self, parameters, context, feedback)
+        require_metric_crs(QgsCoordinateReferenceSystem(self._prepared.crs_wkt))
+        return True
 
     def processAlgorithm(self, parameters, context, feedback):
-        raise_for_missing_dependencies(QgsProcessingException)
-        handlers, calculate = import_metric_runtime()
+        from .metric_engine import compute_metrics, write_metric_raster
 
-        input_path = self.parameterAsString(parameters, self.INPUT, context).strip()
-        if not input_path:
-            raise QgsProcessingException(
-                "Input point cloud source is required. Provide a LAS/LAZ/COPC path, "
-                "an EPT ept.json path, or an EPT URL."
+        selected = (
+            [self.metric]
+            if self.metric
+            else [
+                self.METRIC_OPTIONS[index]
+                for index in self.parameterAsEnums(parameters, "METRICS", context)
+            ]
+        )
+        if not selected:
+            raise QgsProcessingException("Select at least one forest metric.")
+        if self.metric:
+            paths = {
+                self.metric: self.parameterAsOutputLayer(parameters, "OUTPUT", context)
+            }
+            if not paths[self.metric].lower().endswith((".tif", ".tiff")):
+                raise QgsProcessingException("Choose a GeoTIFF (.tif) output file.")
+            folder = None
+        else:
+            folder = ensure_output_folder(
+                self.parameterAsString(parameters, "OUTPUT_FOLDER", context)
             )
-
-        input_crs = qgis_crs_to_string(self.parameterAsCrs(parameters, self.INPUT_CRS, context))
-        if not input_crs and context.project() is not None:
-            input_crs = qgis_crs_to_string(context.project().crs())
-        if not input_crs:
-            raise QgsProcessingException("Input CRS is required when it cannot be inferred from the QGIS project.")
-
-        output_folder = ensure_output_folder(
-            self.parameterAsString(parameters, self.OUTPUT_FOLDER, context)
-        )
-        bounds = None
-        if parameters.get(self.BOUNDS):
-            bounds = extent_to_ept_bounds(self.parameterAsExtent(parameters, self.BOUNDS, context))
-
-        hag_method = self.HAG_OPTIONS[self.parameterAsEnum(parameters, self.HAG_METHOD, context)]
-        dtm_layer = self.parameterAsRasterLayer(parameters, self.DTM, context)
-        dtm_path = raster_layer_path(dtm_layer)
-        if hag_method == "dtm" and not dtm_path:
-            raise QgsProcessingException("A DTM raster is required when HAG method is 'dtm'.")
-
-        polygon_wkt = self._polygon_wkt(parameters, context)
-
-        feedback.pushInfo("Reading LiDAR with PyForestScan.")
-        arrays = handlers.read_lidar(
-            input_file=input_path,
-            srs=input_crs,
-            bounds=bounds,
-            hag=hag_method == "delaunay",
-            hag_dtm=hag_method == "dtm",
-            dtm=dtm_path,
-            crop_poly=bool(polygon_wkt),
-            poly=polygon_wkt,
-        )
-        points = first_point_array(arrays)
-        if points is None or points.size == 0:
-            raise QgsProcessingException("PyForestScan returned no points for the selected input and bounds.")
-
-        metric_indexes = self.parameterAsEnums(parameters, self.METRICS, context)
-        if not metric_indexes:
-            raise QgsProcessingException("Select at least one metric.")
-        selected_metrics = [self.METRIC_OPTIONS[index] for index in metric_indexes]
-
-        xy_resolution = self.parameterAsDouble(parameters, self.VOXEL_XY, context)
-        z_resolution = self.parameterAsDouble(parameters, self.VOXEL_Z, context)
-        voxel_resolution = (xy_resolution, xy_resolution, z_resolution)
-        interpolation_label = self.INTERPOLATION_OPTIONS[
-            self.parameterAsEnum(parameters, self.INTERPOLATION, context)
-        ]
-        interpolation = interpolation_value(interpolation_label)
-        min_height = self.parameterAsDouble(parameters, self.MIN_HEIGHT, context)
-        min_height_index = max(0, int(math.floor(min_height / z_resolution)))
-        cover_min_height = self.parameterAsDouble(parameters, self.COVER_MIN_HEIGHT, context)
-        cover_k = self.parameterAsDouble(parameters, self.COVER_K, context)
-
-        created_files = []
-        rumple_report = ""
-        chm = None
-        chm_extent = None
-
-        if any(metric in selected_metrics for metric in ["CHM", "rumple"]):
-            require_height_above_ground(points)
-            feedback.pushInfo("Calculating CHM.")
-            chm, chm_extent = calculate.calculate_chm(points, voxel_resolution, interpolation=interpolation)
-            if "CHM" in selected_metrics:
-                created_files.append(
-                    self._write_raster(
-                        handlers,
-                        chm,
-                        output_folder,
-                        "chm",
-                        input_crs,
-                        chm_extent,
-                        context,
+            paths = {
+                key: os.path.join(
+                    folder,
+                    METRIC_INFO[key][2] + (".csv" if key == "rumple" else ".tif"),
+                )
+                for key in selected
+            }
+            if not self.parameterAsBool(parameters, "OVERWRITE", context):
+                existing = [path for path in paths.values() if os.path.exists(path)]
+                if existing:
+                    raise QgsProcessingException(
+                        "Output files already exist. Choose a new folder or enable Overwrite: "
+                        + ", ".join(existing)
                     )
-                )
-
-        voxels = None
-        voxel_extent = None
-        pad = None
-        if any(metric in selected_metrics for metric in ["PAD", "PAI", "FHD"]):
-            require_height_above_ground(points)
-            feedback.pushInfo("Assigning voxels.")
-            voxels, voxel_extent = calculate.assign_voxels(points, voxel_resolution)
-
-        if "PAD" in selected_metrics:
-            feedback.pushInfo("Calculating PAD.")
-            pad = calculate.calculate_pad(voxels, z_resolution)
-            pad_file = os.path.join(output_folder, "pad.npz")
-            self._save_numpy(pad_file, pad, voxel_extent, voxel_resolution)
-            created_files.append(pad_file)
-
-        if "PAI" in selected_metrics:
-            feedback.pushInfo("Calculating PAI.")
-            if pad is None:
-                pad = calculate.calculate_pad(voxels, z_resolution)
-            pai = calculate.calculate_pai(pad, min_height=min_height_index)
-            created_files.append(
-                self._write_raster(
-                    handlers,
-                    pai,
-                    output_folder,
-                    "pai",
-                    input_crs,
-                    voxel_extent,
-                    context,
-                )
-            )
-
-        if "FHD" in selected_metrics:
-            feedback.pushInfo("Calculating FHD.")
-            fhd = calculate.calculate_fhd(voxels)
-            created_files.append(
-                self._write_raster(
-                    handlers,
-                    fhd,
-                    output_folder,
-                    "fhd",
-                    input_crs,
-                    voxel_extent,
-                    context,
-                )
-            )
-
-        if "canopy cover" in selected_metrics:
-            feedback.pushInfo("Calculating canopy cover.")
-            canopy_cover, cover_extent = calculate_canopy_cover(
-                points,
-                xy_resolution,
-                min_height=cover_min_height,
-                k=cover_k,
-            )
-            created_files.append(
-                self._write_raster(
-                    handlers,
-                    canopy_cover,
-                    output_folder,
-                    "canopy_cover",
-                    input_crs,
-                    cover_extent,
-                    context,
-                )
-            )
-
-        if "point density" in selected_metrics:
-            feedback.pushInfo("Calculating point density.")
-            density, density_extent = calculate_point_density(points, xy_resolution)
-            created_files.append(
-                self._write_raster(
-                    handlers,
-                    density,
-                    output_folder,
-                    "point_density",
-                    input_crs,
-                    density_extent,
-                    context,
-                )
-            )
-
-        if "rumple" in selected_metrics:
-            feedback.pushInfo("Calculating rumple.")
-            if chm is None:
-                chm, chm_extent = calculate.calculate_chm(points, voxel_resolution, interpolation=interpolation)
-            rumple_value = calculate_rumple(chm, xy_resolution)
-            rumple_report = os.path.join(output_folder, "rumple.csv")
-            with open(rumple_report, "w", newline="", encoding="utf-8") as report_file:
-                writer = csv.writer(report_file)
-                writer.writerow(["metric", "value"])
-                writer.writerow(["rumple", rumple_value])
-            created_files.append(rumple_report)
-
-        return {
-            self.OUTPUT_FOLDER: output_folder,
-            self.OUTPUT_FILES: "\n".join(created_files),
-            self.RUMPLE_REPORT: rumple_report,
-        }
-
-    def _polygon_wkt(self, parameters, context):
-        source = self.parameterAsSource(parameters, self.POLYGON, context)
-        if source is None:
-            return None
-        for feature in source.getFeatures():
-            geometry = feature.geometry()
-            if geometry and not geometry.isEmpty():
-                return geometry.asWkt()
-        return None
-
-    def _write_raster(self, handlers, layer, output_folder, metric_name, crs, extent, context):
-        output_file = os.path.join(output_folder, f"{safe_filename(metric_name)}.tif")
-        handlers.create_geotiff(layer, output_file, crs, extent)
-        add_raster_to_load_on_completion(context, output_file, metric_name.replace("_", " ").title(), self.OUTPUT_FILES)
-        return output_file
-
-    def _save_numpy(self, output_file, array, extent, voxel_resolution):
-        import numpy as np
-
-        np.savez_compressed(
-            output_file,
-            pad=array,
-            extent=extent,
-            voxel_resolution=voxel_resolution,
+        protect_input_paths(
+            paths.values(), [self._prepared.path, self._prepared.dtm_path]
         )
+        check_canceled(feedback)
+        feedback.pushInfo("Reading full-resolution point cloud data.")
+        points = read_point_cloud(self._prepared, feedback)
+        feedback.setProgress(25)
+        z_resolution = (
+            self.parameterAsDouble(parameters, "VOXEL_Z", context)
+            if self.parameterDefinition("VOXEL_Z")
+            else 1.0
+        )
+        options = {"z_resolution": z_resolution, "feedback": feedback}
+        for parameter, option in (
+            ("MIN_HEIGHT", "min_height"),
+            ("FHD_MIN_HEIGHT", "fhd_min_height"),
+            ("COVER_MIN_HEIGHT", "cover_min_height"),
+            ("COVER_K", "cover_k"),
+        ):
+            if self.parameterDefinition(parameter):
+                options[option] = self.parameterAsDouble(parameters, parameter, context)
+        if "voxel statistic" in selected:
+            options["voxel_dimension"] = self.parameterAsString(
+                parameters, "VOXEL_DIMENSION", context
+            ).strip()
+            options["voxel_stat"] = self.STAT_OPTIONS[
+                self.parameterAsEnum(parameters, "VOXEL_STAT", context)
+            ]
+        try:
+            results = compute_metrics(
+                points,
+                selected,
+                xy_resolution=self.parameterAsDouble(parameters, "VOXEL_XY", context),
+                **options,
+            )
+            check_canceled(feedback)
+            outputs = (
+                {}
+                if self.metric
+                else {"OUTPUT_FOLDER": folder, "OUTPUT_FILES": "", "RUMPLE_REPORT": ""}
+            )
+            created = []
+            for index, key in enumerate(selected):
+                check_canceled(feedback)
+                path = paths[key]
+                if key == "rumple":
+                    write_rumple_report(path, results[key])
+                    outputs.update(RUMPLE=results[key], RUMPLE_REPORT=path)
+                else:
+                    write_metric_raster(
+                        results[key],
+                        path,
+                        self._prepared.crs_wkt,
+                        z_resolution=z_resolution,
+                    )
+                    output_key = "OUTPUT" if self.metric else METRIC_INFO[key][3]
+                    outputs[output_key] = path
+                    if not self.metric and self.parameterAsBool(
+                        parameters, "LOAD_OUTPUTS", context
+                    ):
+                        add_raster_to_load_on_completion(
+                            context, path, METRIC_INFO[key][1], output_key
+                        )
+                created.append(path)
+                feedback.setProgress(75 + 25 * (index + 1) / len(selected))
+            if not self.metric:
+                outputs["OUTPUT_FILES"] = "\n".join(created)
+            return outputs
+        except (ValueError, KeyError, RuntimeError, MemoryError) as exc:
+            raise QgsProcessingException(
+                f"Forest metric processing failed: {exc}"
+            ) from exc
 
     def createInstance(self):
-        return CalculateLidarMetricsAlgorithm()
+        return CalculateLidarMetricsAlgorithm(self.metric)

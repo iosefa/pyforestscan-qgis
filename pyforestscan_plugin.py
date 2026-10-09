@@ -9,8 +9,11 @@ class PyForestScanPlugin:
         self.provider = None
 
     def initProcessing(self):
+        if self.provider is not None:
+            return
         self.provider = PyForestScanProvider()
-        QgsApplication.processingRegistry().addProvider(self.provider)
+        if not QgsApplication.processingRegistry().addProvider(self.provider):
+            self.provider = None
 
     def initGui(self):
         self.initProcessing()

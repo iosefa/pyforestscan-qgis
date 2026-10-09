@@ -6,15 +6,15 @@ dependencies:
   - qgis>=4.0,<5
   - python-pdal>=3.4.5
   - rasterio>=1.4
-  - geopandas>=1.1
-  - numpy>=2.1.1
-  - pyproj>=3.6.1
-  - scipy>=1.14.1
-  - shapely>=2.0.6
-  - pandas>=2.2.2
-  - matplotlib>=3.9.2
-  - requests>=2.32.3
+  - geopandas>=1.1.1
+  - numpy>=2.3.1
+  - pyproj>=3.7.1
+  - scipy>=1.16.0
+  - shapely>=2.1.1
+  - pandas>=2.3.0
+  - matplotlib>=3.10.3
+  - requests>=2.32.4
   - tqdm
   - pip
   - pip:
-      - pyforestscan==0.2.4
+      - pyforestscan==0.4.1
