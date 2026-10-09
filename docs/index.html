@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PyForestScan for QGIS — Toolbox help</title>
+<style>
+body { max-width: 980px; margin: 2rem auto; padding: 0 1.2rem 3rem; color: #243329; background: #fff; font: 16px/1.6 system-ui, sans-serif; }
+h1, h2, h3 { line-height: 1.25; color: #184c35; }
+h2 { margin-top: 2.5rem; padding-top: .6rem; border-top: 1px solid #d9e4de; }
+a { color: #145f91; } a:focus { outline: 2px solid #145f91; outline-offset: 3px; }
+code { padding: .1rem .25rem; background: #f0f4f1; overflow-wrap: anywhere; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+th, td { text-align: left; vertical-align: top; border-bottom: 1px solid #d9e4de; padding: .6rem; }
+th { background: #edf3ef; }
+.note { border-left: 4px solid #458969; padding: .4rem 1rem; background: #f4f8f5; }
+nav ul { columns: 2; padding-left: 1.3rem; }
+@media (max-width: 640px) { nav ul { columns: 1; } body { font-size: 15px; } }
+</style>
+</head>
+<body>
+<header>
+<h1>PyForestScan for QGIS</h1>
+<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.2.0, experimental internal release; QGIS 3.40–3.x and 4.x; PyForestScan 0.4.1.</p>
+<p>Select a saved point cloud already in your project, add height above ground, and create forest metric rasters. Tools use normal Processing dialogs, batch jobs, and models. This help is included in the plugin and works offline.</p>
+</header>
+<nav aria-label="Help contents">
+<ul>
+<li><a href="#install">Installation</a></li>
+<li><a href="#workflow">First layer workflow</a></li>
+<li><a href="#inputs">Inputs, CRS, and cropping</a></li>
+<li><a href="#addheightaboveground">Add Height Above Ground</a></li>
+<li><a href="#canopyheightmodel">Canopy Height Model</a></li>
+<li><a href="#plantareadensity">Plant Area Density</a></li>
+<li><a href="#plantareaindex">Plant Area Index</a></li>
+<li><a href="#foliageheightdiversity">Foliage Height Diversity</a></li>
+<li><a href="#canopycover">Canopy Cover</a></li>
+<li><a href="#voxelstatistics">Forest Voxel Statistics</a></li>
+<li><a href="#rumpleindex">Rumple Index from CHM</a></li>
+<li><a href="#calculatelidarmetrics">Calculate Forest Metrics</a></li>
+<li><a href="#processepttiles">Process EPT Tiles</a></li>
+<li><a href="#checkdependencies">Check Dependencies</a></li>
+<li><a href="#interpretation">Interpretation and limits</a></li>
+<li><a href="#troubleshooting">Troubleshooting</a></li>
+</ul>
+</nav>
+<main>
+<section id="install">
+<h2>Installation</h2>
+<p>The plugin ZIP does not contain PyForestScan or compiled dependencies. Install the dependencies in the Python environment used by QGIS. The repository's <code>environment.yml</code> creates a conda environment with QGIS and <code>pyforestscan==0.4.1</code>; launch <code>qgis</code> from that activated environment. A separately installed QGIS application does not automatically see those packages.</p>
+<p>Install <code>pyforestscan_qgis.zip</code> through <strong>Plugins → Manage and Install Plugins → Install from ZIP</strong>, enable PyForestScan, then open <strong>Processing → Toolbox</strong>. Run <a href="#checkdependencies">Check PyForestScan Dependencies</a> before your first analysis. Restart QGIS after upgrading the plugin or its dependencies.</p>
+<p>QGIS 3.40 is the minimum supported version. QGIS 4.x uses the same package. The 28 analytic and integration tests passed on QGIS 3.40.3 and 4.2.3. QGIS 4.0 itself, live remote EPT access, interactive GUI workflows end to end, and Windows have not been validated. Compatibility metadata through 4.99 does not mean every minor version has been tested; see the included <a href="../tests/README.md">test documentation</a> for the recorded scope.</p>
+</section>
+<section id="workflow">
+<h2>First layer workflow</h2>
+<ol>
+<li>Add a LAS/LAZ/COPC or EPT point cloud to the Layers panel. Check its CRS and classification.</li>
+<li>Open <strong>Add Height Above Ground</strong>, choose the point cloud layer, and select Delaunay or a DTM. Save a new LAS/LAZ file and enable QGIS's option to load the result.</li>
+<li>Open a forest metric such as <strong>Canopy Height Model</strong> or <strong>Plant Area Index</strong>. Choose the new point cloud and the existing-height HAG option. Set the XY grid and vertical bin sizes in metres.</li>
+<li>Save the GeoTIFF and load it into QGIS. Use normal raster symbology, statistics, layouts, and downstream Processing tools.</li>
+</ol>
+<p>Metric tools can calculate HAG during a run. Use the separate HAG tool to keep the point dimension for inspection and reuse. Normalizing height adds <code>HeightAboveGround</code>; the source elevation <code>Z</code> remains elevation.</p>
+</section>
+<section id="inputs">
+<h2>Shared inputs, coordinates, and cropping</h2>
+<table>
+<thead><tr><th scope="col">Input</th><th scope="col">How to use it</th></tr></thead>
+<tbody>
+<tr><td>Point cloud layer<br><code>INPUT_LAYER</code></td><td>Choose a saved point cloud from the project. The algorithm reads its underlying data source. Renderer settings and viewport clipping do not filter the input; layer subsets or unsaved changes that cannot be reproduced from the source are rejected.</td></tr>
+<tr><td>Source path or URL<br><code>INPUT</code></td><td>Alternative to the layer selector: local LAS/LAZ/COPC, local <code>ept.json</code>, or HTTP(S) EPT URL. Leave this empty when choosing a layer. Supplying both inputs is an error.</td></tr>
+<tr><td>Missing source CRS<br><code>INPUT_CRS</code></td><td>Only needed if the layer/data metadata has no CRS. This assigns a CRS; it does not transform coordinates. Conflicting known CRS information must be corrected in the source. The project CRS is never silently substituted.</td></tr>
+<tr><td>Extent<br><code>BOUNDS</code></td><td>Restrict the processing area explicitly. QGIS transforms an extent with a known CRS into the point-cloud CRS. An extent without a CRS must already be in source coordinates.</td></tr>
+<tr><td>Crop polygon<br><code>POLYGON</code></td><td>Choose a polygon layer or feature source. Geometries are transformed to the cloud CRS. Use Processing's <strong>Selected features only</strong> option to limit the crop to a selection; otherwise all supplied features are included.</td></tr>
+<tr><td>HAG method<br><code>HAG_METHOD</code></td><td>Metric options: existing <code>HeightAboveGround</code> (0), Delaunay (1), or DTM (2). Existing heights must be present as a point dimension. Selecting Delaunay does not classify ground points.</td></tr>
+<tr><td>DTM<br><code>DTM</code></td><td>A terrain GeoTIFF covering the processing area in the cloud CRS, with compatible metre elevations and vertical reference. Choose it only for DTM-based HAG. Reproject the DTM beforehand if necessary.</td></tr>
+<tr><td>Grid sizes<br><code>VOXEL_XY</code>, <code>VOXEL_Z</code></td><td>Positive XY cell size and vertical height-bin size in metres. Finer bins increase memory use. Height thresholds are metres, not bin indices.</td></tr>
+</tbody>
+</table>
+<p class="note">Forest metrics require a projected CRS whose horizontal units are metres. Z, DTM elevations, and HAG must also be in metres and use compatible vertical references. A CRS label cannot convert feet to metres or fix a vertical datum mismatch. Reproject or convert the data with appropriate QGIS tools before analysis.</p>
+<p>Each single-metric raster tool returns a typed <code>OUTPUT</code> GeoTIFF destination. Use the standard Processing option to load it after completion, or connect the output directly to another model step. Choose persistent paths for outputs you want to retain.</p>
+</section>
+<section id="addheightaboveground">
+<span id="height-above-ground"></span>
+<h2>Add Height Above Ground</h2>
+<p><code>pyforestscan:addheightaboveground</code></p>
+<p>Creates a new LAS/LAZ containing a <code>HeightAboveGround</code> dimension. Choose Delaunay to build the terrain surface from points classified as ground (<code>Classification == 2</code>), or DTM to subtract an existing terrain raster. Delaunay requires at least three ground points that are not all on one line, with enough coverage to support the requested area. Explicit cropping also limits the ground points used. DTM requires valid band 1 terrain values at every processed point.</p>
+<p>The new file retains other point dimensions and can be loaded as an ordinary QGIS point cloud. LAS/LAZ/COPC inputs preserve their native XYZ precision; EPT coordinates are serialized at the precision supported by the output LAS encoding. Elevation Z remains elevation and is not replaced by normalized height. It does not edit the original layer in place. Choose a different output path from the source. The full output directory path must contain no <code>#</code>, because PDAL interprets that character in writer paths as a filename placeholder. Input filenames may contain <code>#</code>. This tool writes LAS/LAZ, not COPC; QGIS may index the new file when loading it. Use this output in later tools with the existing-height HAG option, or style its HAG attribute in QGIS.</p>
+</section>
+<section id="canopyheightmodel">
+<h2>Canopy Height Model</h2>
+<p><code>pyforestscan:canopyheightmodel</code></p>
+<p>Writes the maximum height above ground in each XY cell as a single-band GeoTIFF, in metres. The cell size determines the spatial detail. Empty cells remain NoData.</p>
+<p>Interpolation is disabled because the pinned library's interpolation path has a grid-coordinate issue. If your analysis calls for gap filling, apply an explicit QGIS raster interpolation/fill step to the result and record its settings. Filled gaps are estimated heights.</p>
+</section>
+<section id="plantareadensity">
+<h2>Plant Area Density (PAD)</h2>
+<p><code>pyforestscan:plantareadensity</code></p>
+<p>Bins returns horizontally and by height, then estimates PAD with the PyForestScan Beer–Lambert method. The library's PAD constant is 1, and the actual vertical bin height is supplied to the calculation. PAD has units of plant area per volume (m²/m³).</p>
+<p>The output is a <strong>multiband GeoTIFF</strong>. Band 1 is the lowest height interval beginning at 0 m; later bands proceed upward by <code>VOXEL_Z</code>. Band metadata records the intervals. The lowest ground bin is excluded from PAD and may be entirely NoData. Missing/undefined attenuation values are also NoData.</p>
+<p>In QGIS raster symbology, choose a band to inspect that height slice. This raster preserves the vertical profile; PAI is the separate tool for integrating that profile into a 2D canopy measure. PAD is no longer exported as NPZ.</p>
+</section>
+<section id="plantareaindex">
+<h2>Plant Area Index (PAI)</h2>
+<p><code>pyforestscan:plantareaindex</code></p>
+<p>Integrates PAD above the chosen minimum height using the actual vertical bin height. The result is a single-band GeoTIFF in m²/m², a dimensionless area ratio. A minimum height of 1 m means 1 metre above ground, independently of bin size.</p>
+<p>Thresholds select whole height bins according to the core method. Use consistent vertical bin sizes and thresholds when comparing areas. An empty integration interval can return zero; a column with no valid PAD in a nonempty interval is NoData.</p>
+</section>
+<section id="foliageheightdiversity">
+<h2>Foliage Height Diversity (FHD)</h2>
+<p><code>pyforestscan:foliageheightdiversity</code></p>
+<p>Calculates Shannon entropy of the proportions of returns among vertical height bins for each XY cell. The minimum height defaults to 0 m. The output is a dimensionless single-band GeoTIFF in natural-log units. A larger value indicates returns distributed more evenly across height bins; it does not directly measure species diversity.</p>
+<p>Changing vertical bin size changes the number of possible bins and can change FHD. Compare results with the same grid and height settings. Cells with no returns in the included range are NoData.</p>
+</section>
+<section id="canopycover">
+<h2>Canopy Cover</h2>
+<p><code>pyforestscan:canopycover</code></p>
+<p>Calculates canopy cover from PAD using <code>cover = 1 - exp(-k × PAI_above_threshold)</code>. The minimum height defaults to 2 m and extinction coefficient <code>COVER_K</code> defaults to 0.5. Output values are fractions between 0 and 1; multiply by 100 in a raster expression to display percentages.</p>
+<p>This is a PAD-derived Beer–Lambert estimate, not the fraction of point returns above the height threshold. The canopy-cover extinction coefficient is distinct from the PAD calculation's constant of 1. Both the definition and results differ from plugin 0.1.1.</p>
+</section>
+<section id="voxelstatistics">
+<h2>Forest Voxel Statistics</h2>
+<p><code>pyforestscan:voxelstatistics</code></p>
+<p>Summarizes a chosen point dimension over each XY column. Enter an existing dimension name such as <code>HeightAboveGround</code>, <code>Intensity</code>, or <code>Z</code>, and choose mean, sum, count, minimum, maximum, median, or standard deviation. Dimension names must match the source.</p>
+<p>The output is a 2D single-band GeoTIFF, not a 3D cube. Statistics use the selected dimension's units; count is a number of points, and standard deviation uses the population definition. Count and sum can be zero in empty cells; other statistics use NoData. HAG is required to place points in the height grid even when summarizing another dimension.</p>
+</section>
+<section id="rumpleindex">
+<h2>Rumple Index from CHM</h2>
+<p><code>pyforestscan:rumpleindex</code></p>
+<p>Select a loaded, local, north-up CHM raster and its height band (band 1 by default). An optional minimum-height threshold masks lower cells. The algorithm calculates the ratio of triangulated canopy surface area to planar area over valid adjacent 2×2 raster patches. It returns a CSV report as <code>OUTPUT</code> and a numeric <code>RUMPLE</code> output for models.</p>
+<p>Use a projected metre CRS and heights in metres. At least one complete valid 2×2 patch is required. Rotated rasters must first be warped to a north-up grid; rasters above 20 million cells must be clipped before this in-memory calculation. A flat valid surface has rumple 1; increasing roughness increases the ratio. NoData, threshold masking, raster resolution, and gap filling affect which patches contribute and the resulting value. This is one summary for the input raster, not a per-cell rumple raster.</p>
+</section>
+<section id="calculatelidarmetrics">
+<h2>Calculate Forest Metrics</h2>
+<p><code>pyforestscan:calculatelidarmetrics</code></p>
+<p>Calculates several outputs from one point-cloud read. Select CHM, PAD, PAI, FHD, canopy cover, point density, rumple, or voxel statistics and choose an output folder. <code>LOAD_OUTPUTS</code> controls whether rasters are added to the project. Existing metric files are protected unless <code>OVERWRITE</code> is enabled. Individual outputs have Processing types so models can consume the selected results.</p>
+<p>The first seven metric indices are retained for existing scripts: CHM 0, PAD 1, PAI 2, FHD 3, canopy cover 4, point density 5, rumple 6. Voxel statistics is appended at 7. The algorithm ID remains stable, but corrected calculations and the dependency upgrade mean numeric equivalence to 0.1.1 is not promised.</p>
+<p>PAD is now <code>pad.tif</code>, with height bands. Point density counts retained returns per square metre; points with negative/nonfinite HAG are excluded, so it may differ from a native density of every source return. Rumple is reported in CSV. The single-metric tools are convenient when building a model with one named output per step.</p>
+</section>
+<section id="processepttiles">
+<h2>Process EPT Tiles (advanced)</h2>
+<p><code>pyforestscan:processepttiles</code></p>
+<p>Processes a local or remote EPT dataset in tiles for CHM, PAI, FHD, or canopy cover. Select an EPT point-cloud layer with <code>INPUT_LAYER</code>, or enter its <code>ept.json</code> path/URL with <code>EPT_INPUT</code>. Use only one source input. <code>SRS</code> assigns missing CRS information; it does not reproject a known source.</p>
+<p>Choose a processing extent, tile width/height, XY resolution, vertical bin size, and HAG method. Buffered reads give HAG computation surrounding terrain support; points are then restricted to each core tile for metric output. Tile width and height must be whole multiples of the XY cell size, and the output extent is snapped outward to that common grid. Only points inside the study area contribute to metrics; edge cells may extend beyond it. Empty tiles are skipped. Tiled CHM uses maximum HAG through the core voxel-statistic function.</p>
+<p>Tile dimensions must be whole multiples of the XY cell size. Extents snap outward to that grid; points are clipped to the requested extent, but edge pixels may extend beyond it. Cells without retained points are NoData. A DTM must cover the buffered read area as well as the core tile. Existing tile files require explicit <code>OVERWRITE</code>; only files created in this run are returned.</p>
+<p>The tool writes a folder of GeoTIFF tiles and returns a list of raster outputs. Enable <code>LOAD_OUTPUTS</code> if you want every tile loaded; this is off by default to avoid filling the Layers panel. Use QGIS raster tools to build a virtual raster or mosaic. No automatic resampling or mosaic is performed.</p>
+<p>Optional outlier cleaning affects the points contributing to metrics. Existing tile files cause an error unless <code>OVERWRITE</code> is enabled. Cancellation is checked between tiles/stages, but cannot interrupt an active PDAL call. Completed tiles remain on disk after cancellation; incomplete writes are not published. Start with a small extent to confirm resolution, terrain coverage, and memory use.</p>
+</section>
+<section id="checkdependencies">
+<h2>Check PyForestScan Dependencies</h2>
+<p><code>pyforestscan:checkdependencies</code></p>
+<p>Checks the runtime used by this QGIS process, including the pinned PyForestScan version and imports needed for PDAL and metric processing. Missing Python packages and broken binary imports must be fixed in this same environment. The tool reports issues; it does not install packages.</p>
+<p>A successful import check does not validate a point cloud, its classification, vertical reference, or remote access. Test a small representative crop before a large run.</p>
+</section>
+<section id="interpretation">
+<h2>Interpretation and practical limits</h2>
+<p>Single-area tools read points into memory. Metrics exclude negative/nonfinite HAG and report exclusions in the log; nonfinite source coordinates are rejected during input validation. Voxel volumes grow with footprint, maximum height, and finer XY/Z bins. Crop to the area you need and choose grid sizes appropriate to the data; use EPT tiling for large EPT sources. Dense grid allocations are limited to five million cells/voxels, including voxel overflow bins; exceeding this limit requires a smaller area or larger cells. This limit is not a cap on the memory used to read source points.</p>
+<p>NoData means the metric could not be evaluated for that cell/range. It is not interchangeable with zero. Inspect spatial coverage and the Processing log before interpreting an output. Keep resolution, height thresholds, coefficients, and preprocessing consistent across comparisons. Single-area CHM and voxel metrics can use different grid origins even at the same resolution. Inspect their georeferencing and align rasters explicitly in QGIS before combining cells from different outputs.</p>
+<p>Use QGIS for general point-cloud filtering, clipping, reprojection, ground classification where a suitable provider is installed, raster conversion, mosaicking, and visualization. The plugin's focus is HAG and forest structure. The included <a href="API_COVERAGE.md">API coverage inventory</a> accounts for every public PyForestScan 0.4.1 function, including utilities available only through Python or equivalent QGIS workflows.</p>
+</section>
+<section id="troubleshooting">
+<h2>Troubleshooting</h2>
+<table>
+<thead><tr><th scope="col">Problem</th><th scope="col">Action</th></tr></thead>
+<tbody>
+<tr><td>Provider absent after installing</td><td>Enable the plugin, open the Processing Toolbox, and restart QGIS. A manual installation must use the folder name <code>pyforestscan_qgis</code>.</td></tr>
+<tr><td>Missing module or binary-library import error</td><td>Run the dependency check. Install the pinned environment and launch its QGIS executable; packages in another Python are not sufficient.</td></tr>
+<tr><td>Missing/conflicting CRS or non-metre coordinates</td><td>Inspect the source metadata. Assign a CRS only if it is missing and you know what the coordinates represent. Reproject or convert the source before analysis when required.</td></tr>
+<tr><td>No ground points for Delaunay</td><td>Classify ground using appropriate preprocessing, or supply a suitable DTM. Do not relabel vegetation as ground to bypass the check.</td></tr>
+<tr><td>HAG output rejected for a <code>#</code> in its folder path</td><td>Choose a destination whose full parent directory path contains no <code>#</code>. PDAL uses it as a writer filename placeholder; input filenames are not subject to this output-directory restriction.</td></tr>
+<tr><td>Missing HeightAboveGround</td><td>Run Add Height Above Ground, or choose Delaunay/DTM within the metric tool.</td></tr>
+<tr><td>Empty crop or unexpected coverage</td><td>Check the explicit extent/polygon and its CRS. Confirm the selected-feature setting. Canvas appearance does not determine the crop.</td></tr>
+<tr><td>Slow processing or high memory use</td><td>Try a smaller extent or coarser grid. For EPT, choose smaller tiles. A cancel request takes effect after the active PDAL operation finishes.</td></tr>
+<tr><td>No valid rumple result</td><td>Check that the CHM contains complete finite 2×2 patches and sufficient coverage after any height threshold.</td></tr>
+</tbody>
+</table>
+</section>
+</main>
+</body>
+</html>

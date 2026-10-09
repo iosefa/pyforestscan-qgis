@@ -12,11 +12,16 @@ mkdir -p "${BUILD_DIR}"
 
 cp "${ROOT_DIR}/metadata.txt" "${BUILD_DIR}/"
 cp "${ROOT_DIR}/README.md" "${BUILD_DIR}/"
+cp "${ROOT_DIR}/CHANGELOG.md" "${BUILD_DIR}/"
+cp "${ROOT_DIR}/environment.yml" "${BUILD_DIR}/"
+mkdir -p "${BUILD_DIR}/tests"
+cp "${ROOT_DIR}/tests/README.md" "${BUILD_DIR}/tests/"
 cp "${ROOT_DIR}/__init__.py" "${BUILD_DIR}/"
 cp "${ROOT_DIR}/pyforestscan_plugin.py" "${BUILD_DIR}/"
 cp "${ROOT_DIR}/provider.py" "${BUILD_DIR}/"
 cp -R "${ROOT_DIR}/algorithms" "${BUILD_DIR}/"
 cp -R "${ROOT_DIR}/icons" "${BUILD_DIR}/"
+cp -R "${ROOT_DIR}/docs" "${BUILD_DIR}/"
 find "${BUILD_DIR}" -type d -name "__pycache__" -prune -exec rm -rf {} +
 find "${BUILD_DIR}" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
 
