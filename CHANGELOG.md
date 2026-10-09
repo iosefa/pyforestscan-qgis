@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.3.0 — internal release
+
+- Use QGIS's PDAL Processing tools for native point-cloud reading, crops,
+  compression, and Delaunay HAG. Read uncompressed LAS with bundled laspy and
+  calculate forest metrics with bundled released PyForestScan 0.4.1. Python
+  PDAL bindings are no longer required in the QGIS interpreter.
+- Write rasters and sample terrain through GDAL supplied by QGIS. Preserve
+  original point dimensions and coordinate precision in HAG outputs.
+- Add **Plugins → PyForestScan → Set up PyForestScan** for an optional private
+  engine with exact package manifests for both macOS architectures, Windows
+  x64, and Linux x64. Downloads use HTTPS and SHA256 verification. Installation
+  is cancellable, repairs activate only after a scientific self-test, and no
+  QGIS Python packages or shell settings are changed.
+- Keep analysis in the Processing Toolbox. Select native capabilities per
+  workflow and fall back to an installed engine; setup also permits explicitly
+  choosing the isolated engine for source-specific reader limitations.
+- Correct native crop precision at large map coordinates and fractional tile
+  boundary handling. Safely stage HAG outputs whose directory contains `#`.
+- Include all released PyForestScan source, dependency licenses/provenance, and
+  offline installation and backend guidance in the ZIP.
+
+### Migrating from 0.2.0
+
+Install the new ZIP and restart QGIS. Run **Check PyForestScan Dependencies**;
+install the optional engine only if the chosen workflow needs it. Existing
+Processing algorithm IDs, parameter choices, and output types are retained.
+The old conda environment is no longer required for community installation.
+Native point-cloud workflows need QGIS 4.2 or later; older versions and
+statistical outlier cleaning use the optional engine. This avoids older native
+converters dropping extra point dimensions during LAS/LAZ conversion.
+
 ## 0.2.0 — internal release
 
 Experimental release for internal distribution with QGIS 3.40–3.x and 4.x,

@@ -1,130 +1,214 @@
 # Release verification
 
-The full suite contains **28 tests**: 13 analytic metric/output tests and 15
-PyQGIS provider/integration tests. It uses **PyForestScan 0.4.1**, real PDAL and
-rasterio processing, generated local fixtures, temporary outputs, and an isolated
-QGIS profile. Run it with the Python interpreter belonging to QGIS; a system
-Python usually cannot import `qgis`.
+Test the two execution paths separately. Native processing uses QGIS's compiled
+libraries and point-cloud tools, plus the plugin's bundled PyForestScan 0.4.1 and
+pure-Python LAS reader. The optional engine runs Python PDAL and its other
+libraries in a separate process. Do not install Python PDAL or PyForestScan into
+the QGIS interpreter to run these tests.
 
-## Run the full suite
+Native point-cloud processing requires QGIS **4.2 or later**. QGIS 3.40 and 4.0
+use the isolated engine for point-cloud workflows, including metrics from an
+existing HAG layer: older native conversion writers can drop extra dimensions.
+Raster-only rumple may use the QGIS libraries when its dependencies are present.
 
-From the repository root, using the environment created from `environment.yml`:
+Fixtures use generated local point clouds, temporary outputs, and an isolated
+QGIS profile. Rasterio is a **test-only** dependency for fixture creation and
+independent raster assertions; plugin raster operations use QGIS's GDAL bindings.
+
+## Native QGIS tests
+
+Use the Python interpreter belonging to QGIS. The repository's `environment.yml`
+is a developer/test environment, not an installation requirement for users with
+an existing QGIS application.
 
 ```bash
+conda env create -f environment.yml
 conda activate pyforestscan-qgis
 export QGIS_PREFIX_PATH="$CONDA_PREFIX"
 export PYTHONPATH="$CONDA_PREFIX/share/qgis/python${PYTHONPATH:+:$PYTHONPATH}"
-QT_QPA_PLATFORM=offscreen PYFORESTSCAN_TEST_RUNTIME=1 \
-  python -m unittest discover -s tests -v
+QT_QPA_PLATFORM=offscreen PYFORESTSCAN_BACKEND=native \
+  PYFORESTSCAN_TEST_RUNTIME=1 python -m unittest discover -s tests -v
 ```
 
-`PYFORESTSCAN_TEST_RUNTIME=1` enables all integration tests and makes missing
-metric dependencies fail instead of skipping that test module. A successful
-release run must report all 28 tests passing without skips.
+For the standalone macOS application, use its wrapper, which configures the
+application's Python paths, and set the application's GDAL/PROJ data locations.
+Adjust the application name to the installed version:
+
+```bash
+env -u PYTHONHOME -u PYTHONPATH -u QGIS_PREFIX_PATH -u PROJ_LIB \
+  QT_QPA_PLATFORM=offscreen PYFORESTSCAN_BACKEND=native \
+  PYFORESTSCAN_TEST_RUNTIME=1 \
+  GDAL_DATA=/Applications/QGIS-final-4_2_3.app/Contents/Resources/qgis/gdal \
+  PROJ_DATA=/Applications/QGIS-final-4_2_3.app/Contents/Resources/qgis/proj \
+  /Applications/QGIS-final-4_2_3.app/Contents/MacOS/python \
+  -m unittest discover -s tests -v
+```
+
+`PYFORESTSCAN_TEST_RUNTIME=1` enables QGIS processing tests and makes missing
+analytic dependencies fail. `PYFORESTSCAN_BACKEND=native` prevents an installed
+engine from concealing a missing native capability. The scientific worker class
+is intentionally skipped in this run because QGIS does not need Python PDAL.
+The three worker protocol tests still run without it.
+
+## Isolated-engine tests
+
+Install the private engine using **Plugins → PyForestScan → Set up PyForestScan**.
+For a disposable test installation, set `PYFORESTSCAN_ENGINE_ROOT` before
+starting QGIS or the installer. Use an empty dedicated folder: the installer
+refuses to adopt or remove unrecognized directories.
+
+Run the same QGIS suite with the engine selected:
+
+```bash
+QT_QPA_PLATFORM=offscreen PYFORESTSCAN_BACKEND=engine \
+  PYFORESTSCAN_TEST_RUNTIME=1 python -m unittest discover -s tests -v
+```
+
+This checks the complete QGIS frontend → serialized request → external worker →
+saved outputs path. Also rerun the HAG → LAS/LAZ → loaded layer → CHM test with
+`PYFORESTSCAN_BACKEND=auto` on QGIS 3.40 to verify automatic engine selection:
+
+```bash
+QT_QPA_PLATFORM=offscreen PYFORESTSCAN_BACKEND=auto \
+  PYFORESTSCAN_TEST_RUNTIME=1 python -m unittest discover -s tests \
+  -p test_qgis_runtime.py -k test_hag_layers_precision_and_metrics_reuse -v
+```
+
+The QGIS 3.40 fixtures use the private interpreter for lossless compressed-cloud
+reads and COPC creation because that version's native writers omit dimensions
+or CRS metadata. The tests still create real QGIS layers and run the plugin's
+actual Processing algorithms; Python PDAL remains outside the host process.
+
+Run the worker's actual PDAL/GDAL tests with the private interpreter separately:
+
+```bash
+python - <<'PY'
+import os
+import subprocess
+from runtime import manager
+from runtime.client import sanitized_environment
+
+interpreter = manager.engine_python()
+assert interpreter is not None, "Install the private engine first"
+environment = sanitized_environment(interpreter)
+environment["PYFORESTSCAN_TEST_ENGINE"] = "1"
+if os.environ.get("PYFORESTSCAN_PLUGIN_PATH"):
+    environment["PYFORESTSCAN_PLUGIN_PATH"] = os.environ["PYFORESTSCAN_PLUGIN_PATH"]
+subprocess.run(
+    [str(interpreter), "-I", "-m", "unittest", "discover",
+     "-s", "tests", "-p", "test_worker.py", "-v"],
+    env=environment, check=True,
+)
+PY
+```
+
+`PYFORESTSCAN_TEST_ENGINE=1` is independent of `PYFORESTSCAN_TEST_RUNTIME`.
+It requires every worker scientific dependency and must produce no skips in
+`test_worker.py`. Keep a custom `PYFORESTSCAN_ENGINE_ROOT` set for both setup and
+tests so they resolve the same engine. Installer and protocol checks can also
+run in ordinary Python without QGIS:
+
+```bash
+python -m unittest discover -s tests -p test_engine_manager.py -v
+python -m unittest discover -s tests -p test_worker.py -v
+```
 
 ## What is checked
 
-The 13 tests in `test_metric_engine.py` check scientific values and raster
-behavior against analytic examples and the pinned core library:
+- `test_metric_engine.py`: analytic PAD, PAI, FHD, canopy cover, density, rumple
+  and voxel statistics; non-unit height bins; invalid/negative HAG; degenerate
+  grids; allocation limits; GeoTIFF orientation, CRS, NoData, PAD band metadata,
+  and failed-write preservation. Calculations use the bundled released core.
+- `test_qgis_runtime.py`: all 11 algorithm registrations, parameters and help;
+  loaded LAS/LAZ/COPC layers; persistent HAG with unchanged source bytes, XYZ and
+  extra dimensions; DTM coverage/NoData/CRS checks; crop transformations; typed
+  outputs and layer-loading requests; all eight combined metrics; focused tools;
+  rumple from a loaded raster; and local binary EPT processing and tiling.
+  Fractional-grid checks include a return exactly on a 0.3 m tile boundary at
+  UTM coordinates, an inclusive outer boundary, and empty cells remaining NoData.
+- `test_worker.py`: protocol errors and nonfinite JSON values; a real isolated
+  LAS → HAG → PAI → GeoTIFF self-test; metadata; preserved dimensions/precision;
+  output folders containing `#`; DTM failure rollback; physical units; raster
+  CRS checks; all point views; fractional tile placement and overwrite guards.
+- `test_engine_manager.py`: trusted package manifests, checksum verification,
+  download caching, ownership/symlink/deletion boundaries, repair rollback,
+  activation only after a successful self-test, sanitized process environments,
+  pipe draining, cancellation, and protocol errors. These unit tests mock
+  downloads and installation; a real engine installation is a separate check.
 
-- PAI, PAD, canopy cover, and FHD with non-unit vertical bins; metre thresholds;
-  NoData in unoccupied cells; and zero above-canopy cover/PAI in sampled cells.
-- Rumple on a known inclined plane, uninterpolated CHM gaps, ground-only and
-  single-coordinate clouds, and consistent exclusion of negative/invalid HAG.
-- Voxel statistics, point-density units, invalid parameters, and grid/height-bin
-  allocation limits before core arrays are created.
-- GeoTIFF orientation, extent, CRS, float32/NoData encoding, PAD band metadata,
-  the GeoTIFF band-count limit, and preservation of an existing file on a failed
-  raster write.
-
-The 15 tests in `test_qgis_runtime.py` exercise the actual Processing provider:
-
-- All **11 algorithm registrations**, idempotent loading/unloading, native point
-  cloud and raster parameters, output types, decimal grid sizes, bundled-help
-  URLs, reader detection, and useful dependency error reports.
-- Loaded LAS and LAZ layers → Delaunay HAG → loaded HAG layer → CHM. Source bytes,
-  XYZ precision, and every original point dimension are preserved. COPC input
-  also checks dimension/coordinate preservation in its LAS output.
-- DTM HAG and rejection of wrong CRS, NoData, or absent terrain coverage; failed
-  writes leave existing outputs intact and remove temporary files.
-- Ambiguous/missing inputs, conflicting source CRS, source/terrain overwrite
-  protection including file aliases, point-cloud layer filters, output folders
-  containing `#`, geographic source CRS, and missing HAG.
-- Extents and multiple crop polygons transformed from a different CRS; source
-  CRS remains independent of the deliberately different project CRS.
-- All eight combined metrics on local LAS and binary EPT, using known heights
-  and a 2 m vertical bin. Checks include exact expected metric values, typed
-  outputs, multiband PAD metadata, rumple CSV, and valid QGIS raster layers.
-- All six focused raster tools, output-loading preferences, and rumple from a
-  loaded CHM with a known physical cell size.
-- Local EPT tiled CHM/PAI/FHD values, correct treatment of CHM cell-edge points,
-  and fractional tile sizes without spurious zero-width edge tiles.
-
-Fixtures are generated locally; the suite does not download a point cloud.
-
-## Smaller checks during development
-
-Run only analytic tests with a Python environment containing the pinned metric
-runtime; QGIS is not needed for this module:
+For a quick provider/parameter check, omit `PYFORESTSCAN_TEST_RUNTIME`. The
+processing tests will skip; that is not full release verification. Analytic
+checks can run without QGIS when NumPy, SciPy, GDAL and test-only rasterio are
+available:
 
 ```bash
 PYFORESTSCAN_TEST_RUNTIME=1 \
   python -m unittest discover -s tests -p test_metric_engine.py -v
 ```
 
-In a QGIS-enabled shell, run the provider/parameter subset without enabling full
-runtime tests:
-
-```bash
-QT_QPA_PLATFORM=offscreen \
-  python -m unittest discover -s tests -p test_qgis_runtime.py -v
-```
-
-That command runs four provider/parameter checks and skips the 11 processing
-integration tests. It does not establish that the scientific runtime works and
-is not a release verification run.
-
 ## Verify the packaged plugin
-
-Run these commands in the same activated QGIS environment, with
-`QGIS_PREFIX_PATH` and `PYTHONPATH` set as above:
 
 ```bash
 scripts/package_plugin.sh
 export PYFORESTSCAN_PLUGIN_PATH="$PWD/dist/pyforestscan_qgis"
-QT_QPA_PLATFORM=offscreen PYFORESTSCAN_TEST_RUNTIME=1 \
-  python -m unittest discover -s tests -v
+QT_QPA_PLATFORM=offscreen PYFORESTSCAN_BACKEND=native \
+  PYFORESTSCAN_TEST_RUNTIME=1 python -m unittest discover -s tests -v
 ```
 
-The tests remain in the repository, while `PYFORESTSCAN_PLUGIN_PATH` directs
-both test modules to the implementation staged for the ZIP. Unset that variable
-before returning to source-tree tests. The ZIP's top-level package must be
-`pyforestscan_qgis`, including `docs/index.html` and its algorithm help anchors.
+All test modules honor `PYFORESTSCAN_PLUGIN_PATH`; the tests stay in the
+repository while implementation, bundled dependencies and runtime manifests are
+loaded from the staged ZIP content. Repeat with `PYFORESTSCAN_BACKEND=engine`
+and run the private worker tests against the same staged directory. Unset the
+path variable before returning to source-tree tests.
 
-GitHub Actions is configured to build and test the package on Linux with
-conda-forge QGIS **3.40** and **4.2**. Workflow configuration alone is not evidence
-of a passing remote CI run.
+GitHub Actions is configured to build/test the ZIP with Linux QGIS **3.40 using
+the isolated engine** and **4.2 using native processing**. Its optional manual
+`engine_platforms` input additionally performs real locked-engine installation
+and worker tests on Linux, Windows and macOS runners without installing QGIS.
+The macOS runner tests its detected architecture; this does not cover both Mac
+architectures unless both are run separately. Workflow configuration alone is
+not evidence of a passing remote CI run.
 
-## Recorded compatibility and remaining scope
+## Recorded 0.3.0 validation and remaining scope
 
-Local full-suite runs for this refactor passed on macOS with **QGIS 3.40.3** and
-**QGIS 4.2.3**, using PyForestScan 0.4.1. This verifies headless PyQGIS/PDAL
-processing in those environments. In the standalone macOS QGIS 4.2.3 app,
-the four provider/parameter checks also passed; its 11 full integration checks
-were explicitly skipped because that application lacks the scientific runtime.
-The metadata minimum is **3.40**, with a maximum of **4.99**; each later QGIS
-version still needs its own validation.
+Local verification on macOS Apple Silicon:
 
-**QGIS 4.0 itself has not been runtime-tested.** Live remote EPT access,
-interactive GUI workflows from installation through rendering, and Windows have
-not been validated end to end. The suite checks QGIS layer objects and output
-loading requests, not mouse-driven rendering or asynchronous indexing. It also
-does not establish performance on production-scale clouds or validate every
-advanced EPT option (such as tiled canopy cover, DTM HAG, outlier cleaning, or
-cancellation).
+| Runtime | Result |
+| --- | --- |
+| Standalone QGIS 4.2.3, native processing | 49 tests passed |
+| Standalone QGIS 4.2.3, isolated engine | 49 tests passed |
+| Conda QGIS 3.40.3, isolated engine | 49 tests passed |
+| QGIS 3.40.3, automatic backend choice | LAS/LAZ → HAG → loaded layer → CHM passed |
+| Actual installed 0.4.1-1 osx-arm64 engine | All 11 worker tests passed |
 
-Qt imports must continue to use `qgis.PyQt`. Keep scoped enum names compatible
-with the supported Qt 5 and Qt 6 builds. Relevant upstream guidance:
+The QGIS suite intentionally skips the worker scientific class; those cases
+run separately with the private interpreter. The 49-test runs include all 15
+installer safety tests. A fresh pinned engine installation and repair also
+passed actual processing self-tests. QGIS network-manager downloads were
+verified from a worker thread, and setup cancellation/close behavior was smoke
+tested with Qt. These are local results, not evidence of Windows/Linux or
+remote CI execution.
+
+The staged 0.3.0 ZIP contents also passed the 49-test QGIS 4.2.3 suite with
+each backend and all 11 private-worker tests. Implementation revision:
+`457033b`. Archive checks confirmed all four engine manifests, worker files,
+bundled source/licenses, and offline help are present, with no compiled binaries.
+
+Record the application version, operating system/architecture, backend, package
+revision and actual test result for each release. The declared plugin range is
+QGIS 3.40–4.99; each later QGIS version still requires validation. QGIS 4.0 itself
+has not yet been runtime-tested for this refactor.
+
+The suite does not replace testing installation on other platforms, interactive
+Processing dialogs, point-cloud indexing/rendering, live remote EPT access or
+production-sized datasets. It does not establish native Windows/Linux support
+from a macOS run. Native point-cloud subprocesses receive cancellation; a forced
+engine termination can leave hidden temporary staging files, while completed
+tiles remain available. Validate these workflows on each supported platform
+before claiming broad release coverage.
+
+Qt imports must use `qgis.PyQt`, with scoped enums compatible with the supported
+Qt 5/Qt 6 builds. Relevant upstream guidance:
 
 - [QGIS 4 plugin metadata and migration](https://plugins.qgis.org/docs/migrate-qgis4)
 - [Qt 5 / Qt 6 plugin migration guide](https://github.com/qgis/QGIS/wiki/Plugin-migration-to-be-compatible-with-Qt5-and-Qt6)

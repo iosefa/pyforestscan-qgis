@@ -6,45 +6,75 @@ plant area, foliage height diversity, and other forest structure metrics. The
 plugin uses ordinary Processing dialogs, batch processing, and models; it has no
 separate control panel.
 
-**0.2.0 is an experimental internal release.** It targets QGIS **3.40–3.x and
-4.x** with **PyForestScan 0.4.1**. The 28 analytic and integration tests passed
-on QGIS 3.40.3 and 4.2.3; see [tests/README.md](tests/README.md) for their scope.
+**0.3.0 is an experimental internal release.** It targets QGIS **3.40–3.x and
+4.x** with bundled **PyForestScan 0.4.1**. QGIS's own point-cloud tools and
+scientific libraries are used first, with an optional private engine for
+installations that need it. See [tests/README.md](tests/README.md) for verification.
 Metadata allows QGIS through 4.99; this does not mean every later minor release
 has been tested. QGIS 4.0 itself has not been runtime-tested.
 
 ## Install
-
-The plugin ZIP contains the QGIS integration and offline help. PyForestScan,
-PDAL, and the compiled geospatial dependencies must be installed in **the Python
-environment used by QGIS**. Installing them into an unrelated Python or conda
-environment does not make them available to a standalone QGIS application.
-
-For a conda installation, run these commands from this repository:
-
-```bash
-conda env create -f environment.yml
-conda activate pyforestscan-qgis
-qgis
-```
-
-Launch QGIS from that activated environment. The environment pins
-`pyforestscan==0.4.1`. Use a separate environment when retaining an existing QGIS
-installation; for QGIS 3, change the QGIS dependency to `qgis=3.40` in a copy of
-the environment file before creating it. Do not replace a working installation's
-compiled libraries with an unrelated pip stack.
 
 1. Obtain the internal `pyforestscan_qgis.zip`, or build it with
    `scripts/package_plugin.sh` (output: `dist/pyforestscan_qgis.zip`).
 2. In QGIS, open **Plugins → Manage and Install Plugins → Install from ZIP**,
    select the ZIP, and enable **PyForestScan**.
 3. Open **Processing → Toolbox**, search for **Check PyForestScan Dependencies**,
-   and run it. Resolve reported imports or version mismatches before processing.
+   and run it. If the native checks pass, start using the forest tools.
+4. If a tool reports that it needs the optional engine, open **Plugins →
+   PyForestScan → Set up PyForestScan**, then click **Install engine**. Once
+   validation finishes, rerun the tool. No terminal commands are needed.
+
+The ZIP includes the complete pure-Python source of released PyForestScan 0.4.1
+and laspy 2.7.0, their licenses, and offline help. Native processing uses QGIS's
+PDAL Processing provider, NumPy ≥2.3.1, SciPy ≥1.16, and GDAL Python bindings.
+It does **not** need Python PDAL bindings. Native point-cloud workflows require
+QGIS 4.2 or later for attribute-preserving export and bounded EPT reads; older
+QGIS versions use the isolated engine. Availability
+is checked for the selected workflow, rather than assumed from the QGIS version.
+
+The optional engine has its own Python and pinned scientific libraries in your
+user data directory. Setup downloads packages over HTTPS, verifies their SHA256
+checksums, and tests actual HAG, metric, and raster operations before activating
+them. It does not install into QGIS, run pip in QGIS, or change your shell or
+other Python environments. Repair keeps the previous working engine until its
+replacement passes validation. Removal affects only this plugin's owned engine
+files; verified downloads remain cached for reinstall. Internet access is needed
+for the first installation. An already installed engine can process local data
+offline; remote EPT still needs network access.
+
+Setup shows the platform's download size and required free space. Pinned engine
+packages are provided for **macOS Apple Silicon and Intel, Windows x64, and
+Linux x64**. ARM Windows/Linux engine builds are not provided. Platform package
+availability does not imply that every operating system has passed end-to-end
+testing; see the verification record. Native processing remains available where
+its capability checks pass, even without an engine build for that platform.
+
+| Optional engine | First download, including installer | Free space required for setup |
+| --- | ---: | ---: |
+| macOS Apple Silicon | 171 MB | 2.1 GB |
+| macOS Intel | 183 MB | 2.2 GB |
+| Windows x64 | 306 MB | 3.7 GB |
+| Linux x64 | 228 MB | 2.8 GB |
+
+These are decimal sizes for the pinned 0.3.0 manifests, rounded up. On the tested
+Apple Silicon installation, the engine occupies about 702 MB, plus 171 MB of
+cached downloads. Setup removes its unpacking cache after validation. Previous
+working generations remain until **Remove engine**, so repairs can use more
+disk space.
+
+Leave **Processing backend** set to **Automatic** to use QGIS when possible.
+For a source that QGIS's native reader cannot open, install the engine and choose
+**Isolated engine** in setup to retry with its PDAL reader. All analysis still
+runs through the Processing Toolbox.
 
 For development, install or symlink the repository as `pyforestscan_qgis` under
 `python/plugins` in the active QGIS profile. Find that profile with **Settings →
 User Profiles → Open Active Profile Folder**. The hyphenated repository name
 `pyforestscan-qgis` is not a valid Python plugin package name. Restart QGIS after
-upgrading the plugin or its Python dependencies.
+upgrading the plugin. `environment.yml` is a developer/test environment, not a
+community installation prerequisite. The bundled [setup guide](docs/index.html#setup)
+also explains installation and troubleshooting.
 
 ## Start with a loaded point cloud
 
@@ -68,10 +98,6 @@ upgrading the plugin or its Python dependencies.
 
 Metric tools can also calculate HAG during a run. Use the separate HAG tool when
 you want to keep a normalized-height point cloud for inspection or reuse.
-
-Choose an output directory whose full parent path contains no `#`: PDAL treats
-that character in writer paths as a filename placeholder. This restriction is
-on the HAG output directory, not on input filenames.
 
 Delaunay needs enough suitably distributed classified ground points for a terrain
 surface (at least three non-collinear ground points); selecting the method does
@@ -111,7 +137,7 @@ and is available from each algorithm's help link.
 | Rumple Index from CHM | `rumpleindex` | Loaded CHM raster → CSV report and numeric result |
 | Calculate Forest Metrics | `calculatelidarmetrics` | Several metrics from one read, including point density |
 | Process EPT Tiles | `processepttiles` | Advanced tiled CHM, PAI, FHD, or canopy cover outputs |
-| Check PyForestScan Dependencies | `checkdependencies` | Runtime import and version report |
+| Check PyForestScan Dependencies | `checkdependencies` | Native capability report and installed-engine self-test |
 
 Single-metric raster tools expose `OUTPUT` as a raster destination, so results
 can feed the next step in a Processing model. The combined tool retains its
@@ -137,13 +163,21 @@ classification where available, raster conversion, mosaicking, and display. The
 function in the pinned library and explains which are exposed, used internally,
 or left to QGIS/Python. Not every Python helper needs a toolbox entry.
 
-Single-area processing reads points into memory and can create large voxel
+Native processing stages point clouds through temporary uncompressed LAS files;
+allow disk space for those files even when the input is compressed. Single-area
+processing reads points into memory and can create large voxel
 arrays. Dense raster/voxel grids are limited to five million cells/voxels; this
 does not limit the source point-read memory. Start with a small explicit extent,
 use a suitable grid size, and use the advanced EPT tiling tool for large EPT
-inputs. Cancellation is checked between
-processing stages; an active PDAL call must finish before cancellation can take
-effect. Remote EPT access depends on network access and the installed reader.
+inputs. Cancellation is checked between processing stages and during engine
+jobs. Completed outputs remain on disk; a forced stop may leave a hidden staging
+file in the output directory. Remote EPT access depends on network access and
+the selected reader.
+
+QGIS's native LAS export can quantize floating-coordinate EPT data to **0.01 m**.
+Choose **Isolated engine** for EPT metric calculations needing finer source
+precision. LAS/LAZ/COPC inputs retain their stored coordinate scales; persistent
+HAG outputs from EPT still use LAS coordinate encoding.
 
 An empty height interval or missing returns can yield NoData; this is different
 from a measured zero. Missing terrain coverage stops HAG processing. Inspect

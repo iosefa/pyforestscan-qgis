@@ -21,12 +21,13 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <body>
 <header>
 <h1>PyForestScan for QGIS</h1>
-<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.2.0, experimental internal release; QGIS 3.40–3.x and 4.x; PyForestScan 0.4.1.</p>
+<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.3.0, experimental internal release; QGIS 3.40–3.x and 4.x; bundled PyForestScan 0.4.1.</p>
 <p>Select a saved point cloud already in your project, add height above ground, and create forest metric rasters. Tools use normal Processing dialogs, batch jobs, and models. This help is included in the plugin and works offline.</p>
 </header>
 <nav aria-label="Help contents">
 <ul>
 <li><a href="#install">Installation</a></li>
+<li><a href="#setup">Optional engine setup</a></li>
 <li><a href="#workflow">First layer workflow</a></li>
 <li><a href="#inputs">Inputs, CRS, and cropping</a></li>
 <li><a href="#addheightaboveground">Add Height Above Ground</a></li>
@@ -47,9 +48,20 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <main>
 <section id="install">
 <h2>Installation</h2>
-<p>The plugin ZIP does not contain PyForestScan or compiled dependencies. Install the dependencies in the Python environment used by QGIS. The repository's <code>environment.yml</code> creates a conda environment with QGIS and <code>pyforestscan==0.4.1</code>; launch <code>qgis</code> from that activated environment. A separately installed QGIS application does not automatically see those packages.</p>
-<p>Install <code>pyforestscan_qgis.zip</code> through <strong>Plugins → Manage and Install Plugins → Install from ZIP</strong>, enable PyForestScan, then open <strong>Processing → Toolbox</strong>. Run <a href="#checkdependencies">Check PyForestScan Dependencies</a> before your first analysis. Restart QGIS after upgrading the plugin or its dependencies.</p>
-<p>QGIS 3.40 is the minimum supported version. QGIS 4.x uses the same package. The 28 analytic and integration tests passed on QGIS 3.40.3 and 4.2.3. QGIS 4.0 itself, live remote EPT access, interactive GUI workflows end to end, and Windows have not been validated. Compatibility metadata through 4.99 does not mean every minor version has been tested; see the included <a href="../tests/README.md">test documentation</a> for the recorded scope.</p>
+<p>Install <code>pyforestscan_qgis.zip</code> through <strong>Plugins → Manage and Install Plugins → Install from ZIP</strong>, enable PyForestScan, then open <strong>Processing → Toolbox</strong>. Run <a href="#checkdependencies">Check PyForestScan Dependencies</a> before your first analysis. If the native checks pass, start using the forest tools. If the selected workflow needs the optional engine, follow the setup steps below. Restart QGIS after upgrading the plugin.</p>
+<p>The ZIP includes the complete pure-Python sources of PyForestScan 0.4.1 and laspy 2.7.0, their licenses, and this offline help. Native processing uses QGIS's PDAL Processing provider, NumPy ≥2.3.1, SciPy ≥1.16, and GDAL Python bindings. It does not need Python PDAL bindings. Native point-cloud workflows require QGIS 4.2 or later for attribute-preserving export and bounded EPT reads. Older versions and statistical outlier cleaning use the optional engine. Capabilities are checked per workflow.</p>
+<p>QGIS 3.40 is the minimum declared version. QGIS 4.x uses the same ZIP. Compatibility metadata through 4.99 does not mean every minor version has been tested; see the included <a href="../tests/README.md">test documentation</a> for the recorded scope. The repository's <code>environment.yml</code> is for developers and tests, not required for community installation.</p>
+</section>
+<section id="setup">
+<h2>Optional engine setup</h2>
+<ol>
+<li>Open <strong>Plugins → PyForestScan → Set up PyForestScan</strong>. The dialog reports native capabilities and the private engine's status, location, download size, and free-space requirement.</li>
+<li>Click <strong>Install engine</strong>. Keep QGIS open while packages download and the installation is tested. The first installation requires an internet connection; cancellation leaves any previous working engine available.</li>
+<li>When setup reports that the engine is ready, rerun the Processing tool. Leave <strong>Processing backend</strong> on <strong>Automatic</strong> to use QGIS when it has the required capabilities. If QGIS cannot read a particular source, choose <strong>Isolated engine</strong> to retry with the private PDAL reader.</li>
+</ol>
+<p>No terminal commands or administrator installation are required. The engine contains its own Python and scientific libraries under your user data directory. Exact package downloads use HTTPS and SHA256 verification. A real HAG, metric, and raster self-test must pass before activation. QGIS's Python, other environments, and shell settings are not changed. On macOS, setup restores code signatures invalidated by package relocation inside this private environment.</p>
+<p>Packages are provided for macOS Apple Silicon and Intel, Windows x64, and Linux x64. ARM Windows/Linux engine packages are not provided. Availability of a package manifest is distinct from end-to-end platform validation; consult the test record. The native workflow can still work on platforms without an engine package if its capability checks pass.</p>
+<p>Use <strong>Repair engine</strong> for a broken installation. A replacement is built separately and becomes active only after validation; a failed repair preserves the current working engine. <strong>Remove engine</strong> removes only this plugin's owned engine installations and retains verified downloads for reinstall. Point clouds and projects are unaffected. An installed engine can process local data offline. Network proxies and certificates configured in QGIS are used for setup downloads.</p>
 </section>
 <section id="workflow">
 <h2>First layer workflow</h2>
@@ -84,7 +96,7 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <h2>Add Height Above Ground</h2>
 <p><code>pyforestscan:addheightaboveground</code></p>
 <p>Creates a new LAS/LAZ containing a <code>HeightAboveGround</code> dimension. Choose Delaunay to build the terrain surface from points classified as ground (<code>Classification == 2</code>), or DTM to subtract an existing terrain raster. Delaunay requires at least three ground points that are not all on one line, with enough coverage to support the requested area. Explicit cropping also limits the ground points used. DTM requires valid band 1 terrain values at every processed point.</p>
-<p>The new file retains other point dimensions and can be loaded as an ordinary QGIS point cloud. LAS/LAZ/COPC inputs preserve their native XYZ precision; EPT coordinates are serialized at the precision supported by the output LAS encoding. Elevation Z remains elevation and is not replaced by normalized height. It does not edit the original layer in place. Choose a different output path from the source. The full output directory path must contain no <code>#</code>, because PDAL interprets that character in writer paths as a filename placeholder. Input filenames may contain <code>#</code>. This tool writes LAS/LAZ, not COPC; QGIS may index the new file when loading it. Use this output in later tools with the existing-height HAG option, or style its HAG attribute in QGIS.</p>
+<p>The new file retains other point dimensions and can be loaded as an ordinary QGIS point cloud. LAS/LAZ/COPC inputs preserve their native XYZ precision; EPT coordinates are serialized at the precision supported by the output LAS encoding. Elevation Z remains elevation and is not replaced by normalized height. It does not edit the original layer in place. Choose a different output path from the source. This tool writes LAS/LAZ, not COPC; QGIS may index the new file when loading it. Use this output in later tools with the existing-height HAG option, or style its HAG attribute in QGIS.</p>
 </section>
 <section id="canopyheightmodel">
 <h2>Canopy Height Model</h2>
@@ -143,17 +155,18 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <p>Choose a processing extent, tile width/height, XY resolution, vertical bin size, and HAG method. Buffered reads give HAG computation surrounding terrain support; points are then restricted to each core tile for metric output. Tile width and height must be whole multiples of the XY cell size, and the output extent is snapped outward to that common grid. Only points inside the study area contribute to metrics; edge cells may extend beyond it. Empty tiles are skipped. Tiled CHM uses maximum HAG through the core voxel-statistic function.</p>
 <p>Tile dimensions must be whole multiples of the XY cell size. Extents snap outward to that grid; points are clipped to the requested extent, but edge pixels may extend beyond it. Cells without retained points are NoData. A DTM must cover the buffered read area as well as the core tile. Existing tile files require explicit <code>OVERWRITE</code>; only files created in this run are returned.</p>
 <p>The tool writes a folder of GeoTIFF tiles and returns a list of raster outputs. Enable <code>LOAD_OUTPUTS</code> if you want every tile loaded; this is off by default to avoid filling the Layers panel. Use QGIS raster tools to build a virtual raster or mosaic. No automatic resampling or mosaic is performed.</p>
-<p>Optional outlier cleaning affects the points contributing to metrics. Existing tile files cause an error unless <code>OVERWRITE</code> is enabled. Cancellation is checked between tiles/stages, but cannot interrupt an active PDAL call. Completed tiles remain on disk after cancellation; incomplete writes are not published. Start with a small extent to confirm resolution, terrain coverage, and memory use.</p>
+<p>Optional outlier cleaning requires the isolated engine and affects the points contributing to metrics. Existing tile files cause an error unless <code>OVERWRITE</code> is enabled. Cancellation is checked between stages and during engine jobs. Completed tiles remain on disk after cancellation; incomplete writes are not published. A forced stop can leave a hidden staging file in the output directory. Start with a small extent to confirm resolution, terrain coverage, memory use, and temporary disk space.</p>
 </section>
 <section id="checkdependencies">
 <h2>Check PyForestScan Dependencies</h2>
 <p><code>pyforestscan:checkdependencies</code></p>
-<p>Checks the runtime used by this QGIS process, including the pinned PyForestScan version and imports needed for PDAL and metric processing. Missing Python packages and broken binary imports must be fixed in this same environment. The tool reports issues; it does not install packages.</p>
-<p>A successful import check does not validate a point cloud, its classification, vertical reference, or remote access. Test a small representative crop before a large run.</p>
+<p>Reports QGIS's native capabilities, bundled PyForestScan version, and the optional engine's status. If an engine is installed, it runs a real HAG, metric, and raster self-test. Overall status is OK when the default native workflow is available or the installed engine passes its test. Missing native capabilities can therefore appear alongside an overall OK status when the engine supplies them. Individual tools check their own requirements when run.</p>
+<p>This tool reports issues; it does not install packages. Use <a href="#setup">PyForestScan setup</a> to install or repair the private engine. A successful check does not validate a point cloud, its classification, vertical reference, or remote access. Test a small representative crop before a large run.</p>
 </section>
 <section id="interpretation">
 <h2>Interpretation and practical limits</h2>
-<p>Single-area tools read points into memory. Metrics exclude negative/nonfinite HAG and report exclusions in the log; nonfinite source coordinates are rejected during input validation. Voxel volumes grow with footprint, maximum height, and finer XY/Z bins. Crop to the area you need and choose grid sizes appropriate to the data; use EPT tiling for large EPT sources. Dense grid allocations are limited to five million cells/voxels, including voxel overflow bins; exceeding this limit requires a smaller area or larger cells. This limit is not a cap on the memory used to read source points.</p>
+<p>Native processing uses temporary uncompressed LAS files, so allow disk space beyond the compressed input size. Single-area tools read points into memory. Metrics exclude negative/nonfinite HAG and report exclusions in the log; nonfinite source coordinates are rejected during input validation. Voxel volumes grow with footprint, maximum height, and finer XY/Z bins. Crop to the area you need and choose grid sizes appropriate to the data; use EPT tiling for large EPT sources. Dense grid allocations are limited to five million cells/voxels, including voxel overflow bins; exceeding this limit requires a smaller area or larger cells. This limit is not a cap on the memory used to read source points.</p>
+<p>QGIS's native LAS export can quantize floating-coordinate EPT data to <strong>0.01 m</strong>. Select <strong>Isolated engine</strong> in setup for EPT metric calculations requiring finer source precision. LAS/LAZ/COPC inputs keep their stored coordinate scales. Persistent HAG outputs from EPT still use LAS coordinate encoding.</p>
 <p>NoData means the metric could not be evaluated for that cell/range. It is not interchangeable with zero. Inspect spatial coverage and the Processing log before interpreting an output. Keep resolution, height thresholds, coefficients, and preprocessing consistent across comparisons. Single-area CHM and voxel metrics can use different grid origins even at the same resolution. Inspect their georeferencing and align rasters explicitly in QGIS before combining cells from different outputs.</p>
 <p>Use QGIS for general point-cloud filtering, clipping, reprojection, ground classification where a suitable provider is installed, raster conversion, mosaicking, and visualization. The plugin's focus is HAG and forest structure. The included <a href="API_COVERAGE.md">API coverage inventory</a> accounts for every public PyForestScan 0.4.1 function, including utilities available only through Python or equivalent QGIS workflows.</p>
 </section>
@@ -163,13 +176,13 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <thead><tr><th scope="col">Problem</th><th scope="col">Action</th></tr></thead>
 <tbody>
 <tr><td>Provider absent after installing</td><td>Enable the plugin, open the Processing Toolbox, and restart QGIS. A manual installation must use the folder name <code>pyforestscan_qgis</code>.</td></tr>
-<tr><td>Missing module or binary-library import error</td><td>Run the dependency check. Install the pinned environment and launch its QGIS executable; packages in another Python are not sufficient.</td></tr>
+<tr><td>Native capability unavailable or binary-library import error</td><td>Run the dependency check, then install the optional engine through PyForestScan setup. Leave Automatic selected for normal use, or select Isolated engine to retry a source-specific reader failure.</td></tr>
+<tr><td>Download, checksum, or setup self-test failed</td><td>Check network/proxy access and free disk space, then retry Install/Repair in setup. Failed downloads are not activated, and a previous working engine is preserved. Do not bypass certificate or checksum errors.</td></tr>
 <tr><td>Missing/conflicting CRS or non-metre coordinates</td><td>Inspect the source metadata. Assign a CRS only if it is missing and you know what the coordinates represent. Reproject or convert the source before analysis when required.</td></tr>
 <tr><td>No ground points for Delaunay</td><td>Classify ground using appropriate preprocessing, or supply a suitable DTM. Do not relabel vegetation as ground to bypass the check.</td></tr>
-<tr><td>HAG output rejected for a <code>#</code> in its folder path</td><td>Choose a destination whose full parent directory path contains no <code>#</code>. PDAL uses it as a writer filename placeholder; input filenames are not subject to this output-directory restriction.</td></tr>
 <tr><td>Missing HeightAboveGround</td><td>Run Add Height Above Ground, or choose Delaunay/DTM within the metric tool.</td></tr>
 <tr><td>Empty crop or unexpected coverage</td><td>Check the explicit extent/polygon and its CRS. Confirm the selected-feature setting. Canvas appearance does not determine the crop.</td></tr>
-<tr><td>Slow processing or high memory use</td><td>Try a smaller extent or coarser grid. For EPT, choose smaller tiles. A cancel request takes effect after the active PDAL operation finishes.</td></tr>
+<tr><td>Slow processing or high memory use</td><td>Try a smaller extent or coarser grid. For EPT, choose smaller tiles. Allow temporary disk space for uncompressed LAS when using native processing.</td></tr>
 <tr><td>No valid rumple result</td><td>Check that the CHM contains complete finite 2×2 patches and sufficient coverage after any height threshold.</td></tr>
 </tbody>
 </table>

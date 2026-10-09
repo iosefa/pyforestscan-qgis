@@ -1,20 +1,13 @@
 name: pyforestscan-qgis
+# Developer/test environment only. Community users install the plugin ZIP in
+# their existing QGIS and use its optional private-engine setup when needed.
 channels:
   - conda-forge
 dependencies:
   - python=3.12
-  - qgis>=4.0,<5
-  - python-pdal>=3.4.5
+  - qgis=4.2
+  - gdal
+  # Rasterio is used by the test fixtures/assertions, not by the plugin.
   - rasterio>=1.4
-  - geopandas>=1.1.1
   - numpy>=2.3.1
-  - pyproj>=3.7.1
   - scipy>=1.16.0
-  - shapely>=2.1.1
-  - pandas>=2.3.0
-  - matplotlib>=3.10.3
-  - requests>=2.32.4
-  - tqdm
-  - pip
-  - pip:
-      - pyforestscan==0.4.1

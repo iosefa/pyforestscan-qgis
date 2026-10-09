@@ -1,10 +1,15 @@
 # PyForestScan 0.4.1 API coverage
 
 This inventory covers every public function defined by the **released
-PyForestScan 0.4.1** Python modules. It is the dependency used by plugin 0.2.0;
-a local development checkout is not the release contract. The installed Python
-library remains available for scripting. The plugin does not vendor a copy or
-promise a separate Processing algorithm for every helper.
+PyForestScan 0.4.1** Python modules. Plugin 0.3.0 includes the complete released
+source under `vendor/pyforestscan`, with its MIT license and source hashes in
+`vendor/sources.json`. Internal imports are made relative to keep it separate
+from other plugins. A local development checkout is not the release contract.
+Bundling source does not create a Processing algorithm for every helper:
+PDAL-dependent helpers need Python PDAL and the plotting helpers need their
+plotting dependencies. The optional isolated engine supplies that scientific
+stack; its worker exposes the supported forest workflows. For direct upstream
+scripting, use a separate Python environment with the released library.
 
 **Tool** means an exposed forest workflow. **Internal** means supporting behavior
 inside a tool, which may use a QGIS/PDAL adapter instead of directly calling the
@@ -40,7 +45,7 @@ These ten functions are also exported by `pyforestscan.__init__`.
 | `filter_ground` | QGIS/Python | General classification filtering is left to QGIS/PDAL. |
 | `filter_select_ground` | QGIS/Python | Select class 2 with a point-cloud filter when preparing a terrain workflow. |
 | `filter_pointsourceid` | QGIS/Python | General point-source filtering is outside the forest toolbox. |
-| `remove_outliers_and_clean` | Advanced EPT option; otherwise QGIS/Python | Optional cleaning in tiled processing; no dedicated cleaning tool. |
+| `remove_outliers_and_clean` | Advanced EPT option; otherwise QGIS/Python | Optional cleaning in tiled processing requires the isolated engine; no dedicated cleaning tool. |
 | `classify_ground_points` | QGIS/Python | Ground classification is a prerequisite, not an automatic side effect of selecting Delaunay HAG. Use an available QGIS/PDAL ground classifier. |
 | `downsample_poisson` | QGIS/Python | General thinning is left to point-cloud preprocessing tools. |
 | `downsample_voxel` | QGIS/Python | General voxel thinning is left to point-cloud preprocessing tools. |

@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      engine_platforms:
+        description: Run real isolated-engine installation and worker tests on Linux, Windows and macOS
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -14,14 +19,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        qgis: ["3.40", "4.2"]
+        include:
+          - qgis: "3.40"
+            backend: engine
+          - qgis: "4.2"
+            backend: native
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYFORESTSCAN_TEST_RUNTIME: "1"
+      PYFORESTSCAN_BACKEND: ${{ matrix.backend }}
     defaults:
       run:
         shell: bash -el {0}
     steps:
       - uses: actions/checkout@v4
       - name: Select QGIS version
-        run: sed 's/qgis>=4.0,<5/qgis=${{ matrix.qgis }}/' environment.yml > "$RUNNER_TEMP/environment.yml"
+        run: sed 's/qgis=4.2/qgis=${{ matrix.qgis }}/' environment.yml > "$RUNNER_TEMP/environment.yml"
       - uses: conda-incubator/setup-miniconda@v3
         with:
           miniforge-version: latest
@@ -29,12 +42,68 @@ jobs:
           environment-file: ${{ runner.temp }}/environment.yml
           auto-activate-base: false
       - name: Build and test the plugin package
-        env:
-          QT_QPA_PLATFORM: offscreen
-          PYFORESTSCAN_TEST_RUNTIME: "1"
         run: |
           scripts/package_plugin.sh
           export QGIS_PREFIX_PATH="$CONDA_PREFIX"
-          export PYTHONPATH="$CONDA_PREFIX/share/qgis/python${PYTHONPATH:+:$PYTHONPATH}"
+          export PYTHONPATH="$PWD/dist:$CONDA_PREFIX/share/qgis/python${PYTHONPATH:+:$PYTHONPATH}"
           export PYFORESTSCAN_PLUGIN_PATH="$PWD/dist/pyforestscan_qgis"
+          export PYFORESTSCAN_ENGINE_ROOT="$RUNNER_TEMP/pyforestscan-engine"
+          # Native runs must not accidentally depend on host Python PDAL.
+          python - <<'PY'
+          import importlib.util
+          import os
+          assert importlib.util.find_spec("pdal") is None, "Python PDAL must stay outside QGIS"
+          if os.environ["PYFORESTSCAN_BACKEND"] == "engine":
+              from pyforestscan_qgis.runtime import manager
+              state = manager.install_engine(progress=lambda value, message: print(message, flush=True))
+              assert state["installed"], state
+          PY
           python -m unittest discover -s tests -v
+          if [ "$PYFORESTSCAN_BACKEND" = engine ]; then
+            PYFORESTSCAN_BACKEND=auto python -m unittest discover -s tests \
+              -p test_qgis_runtime.py -k test_hag_layers_precision_and_metrics_reuse -v
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-qgis-${{ matrix.qgis }}-${{ matrix.backend }}
+          path: dist/pyforestscan_qgis.zip
+
+  isolated-engine:
+    if: github.event_name == 'workflow_dispatch' && inputs.engine_platforms
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check installer guards, install locked runtime, and exercise real jobs
+        run: |
+          python -m unittest discover -s tests -p test_engine_manager.py -v
+          python - <<'PY'
+          import os
+          import subprocess
+          os.environ["PYFORESTSCAN_ENGINE_ROOT"] = os.path.join(os.environ["RUNNER_TEMP"], "pyforestscan-engine")
+          from runtime import manager
+          from runtime.client import sanitized_environment
+
+          state = manager.install_engine(progress=lambda value, message: print(message, flush=True))
+          assert state["installed"], state
+          print("Installed platform:", state["platform"], flush=True)
+          interpreter = manager.engine_python()
+          environment = sanitized_environment(interpreter)
+          environment["PYFORESTSCAN_TEST_ENGINE"] = "1"
+          if os.environ.get("PYFORESTSCAN_PLUGIN_PATH"):
+              environment["PYFORESTSCAN_PLUGIN_PATH"] = os.environ["PYFORESTSCAN_PLUGIN_PATH"]
+          subprocess.run(
+              [str(interpreter), "-I", "-m", "unittest", "discover",
+               "-s", "tests", "-p", "test_worker.py", "-v"],
+              env=environment, check=True,
+          )
+          PY
