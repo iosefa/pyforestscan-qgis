@@ -57,12 +57,20 @@ METRIC_INFO = {
         "VOXEL_STATISTIC",
     ),
 }
+CANOPY_COVER_COEFFICIENT_HELP = (
+    "The extinction coefficient k is a dimensionless factor describing how strongly "
+    "plant area blocks light in this model. Higher k gives higher estimated cover "
+    "for the same plant area. Keep 0.5 unless your method or calibration specifies "
+    "another value."
+)
+
 METRIC_HELP = {
     "CHM": "Maximum HeightAboveGround in each XY cell, in metres. Empty cells remain NoData. Gap filling is left to QGIS raster tools.",
     "PAD": "Plant area density in inverse metres. The output is a multiband GeoTIFF: band 1 is the lowest height bin, with height ranges in band descriptions. Ground, undefined bins, and empty columns are NoData; a sampled bin with no estimated foliage may be zero.",
     "PAI": "Plant area index is the vertical integral of PAD above the minimum height, with vertical bin size included. Output is dimensionless; unsampled columns remain NoData.",
     "FHD": "Shannon entropy of return proportions across height bins above the selected minimum height, in natural-log units. Empty columns are NoData.",
-    "canopy cover": "PAD-derived canopy cover: 1 − exp(−k × PAI above the height threshold). Values are fractions from 0 to 1, not percentages or a raw above-height return ratio.",
+    "canopy cover": "PAD-derived canopy cover: 1 − exp(−k × PAI above the height threshold). Values are fractions from 0 to 1, not percentages or a raw above-height return ratio. "
+    + CANOPY_COVER_COEFFICIENT_HELP,
     "point density": "Number of nonnegative HeightAboveGround returns per square metre in each voxel column. Native QGIS tools also provide density without requiring HeightAboveGround.",
     "rumple": "Ratio of CHM surface area to its projected ground area. A flat valid canopy has value 1. The standalone Rumple Index tool accepts a CHM raster.",
     "voxel statistic": "A column statistic for a point-cloud dimension over the height-normalized voxel grid. Available statistics: mean, sum, count, minimum, maximum, median, standard deviation.",
@@ -187,6 +195,7 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
         if self._uses("canopy cover"):
             self._number("COVER_MIN_HEIGHT", "Minimum height for canopy cover (m)", 2.0)
             self._number("COVER_K", "Canopy cover extinction coefficient", 0.5)
+            self.parameterDefinition("COVER_K").setHelp(CANOPY_COVER_COEFFICIENT_HELP)
         if self._uses("voxel statistic"):
             self.addParameter(
                 QgsProcessingParameterString(

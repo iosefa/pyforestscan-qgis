@@ -6,7 +6,7 @@ plant area, foliage height diversity, and other forest structure metrics. The
 plugin uses ordinary Processing dialogs, batch processing, and models; it has no
 separate control panel.
 
-**0.4.0 is an experimental internal release.** It targets QGIS **3.40–3.x and
+**0.4.1 is an experimental internal release.** It targets QGIS **3.40–3.x and
 4.x** with bundled **PyForestScan 0.4.1**. QGIS's own point-cloud tools and
 scientific libraries are used first, with an optional private engine for
 installations that need it. See [tests/README.md](tests/README.md) for verification.

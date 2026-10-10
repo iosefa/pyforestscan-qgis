@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 — explain the canopy-cover coefficient
+
+- Explain the extinction coefficient beside the canopy-cover formula in the
+  Processing help panel, in the coefficient's field help (including EPT), and
+  in bundled documentation. Describe its effect and when to retain 0.5.
+- No calculation, default-value, or engine changes.
+
 ## 0.4.0 — prepare heights before forest metrics
 
 - Require an existing, exactly named `HeightAboveGround` dimension for all

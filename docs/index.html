@@ -21,7 +21,7 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <body>
 <header>
 <h1>PyForestScan for QGIS</h1>
-<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.4.0, experimental internal release; QGIS 3.40–3.x and 4.x; bundled PyForestScan 0.4.1.</p>
+<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.4.1, experimental internal release; QGIS 3.40–3.x and 4.x; bundled PyForestScan 0.4.1.</p>
 <p>Select a saved point cloud already in your project, add height above ground, and create forest metric rasters. Tools use normal Processing dialogs, batch jobs, and models. This help is included in the plugin and works offline.</p>
 </header>
 <nav aria-label="Help contents">
@@ -127,6 +127,7 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <h2>Canopy Cover</h2>
 <p><code>pyforestscan:canopycover</code></p>
 <p>Calculates canopy cover from PAD using <code>cover = 1 - exp(-k × PAI_above_threshold)</code>. The minimum height defaults to 2 m and extinction coefficient <code>COVER_K</code> defaults to 0.5. Output values are fractions between 0 and 1; multiply by 100 in a raster expression to display percentages.</p>
+<p>The extinction coefficient <code>k</code> is a dimensionless factor describing how strongly plant area blocks light in this model. Higher <code>k</code> gives higher estimated cover for the same plant area. Keep 0.5 unless your method or calibration specifies another value.</p>
 <p>This is a PAD-derived Beer–Lambert estimate, not the fraction of point returns above the height threshold. The canopy-cover extinction coefficient is distinct from the PAD calculation's constant of 1. Both the definition and results differ from plugin 0.1.1.</p>
 </section>
 <section id="voxelstatistics">

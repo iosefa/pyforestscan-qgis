@@ -17,6 +17,7 @@ from qgis.core import (
     QgsProcessingParameterNumber,
 )
 
+from .calculate_lidar_metrics import CANOPY_COVER_COEFFICIENT_HELP
 from .common import (
     add_raster_to_load_on_completion,
     check_canceled,
@@ -121,6 +122,7 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
             0.5,
             when=("METRIC", [3]),
         )
+        self.parameterDefinition("COVER_K").setHelp(CANOPY_COVER_COEFFICIENT_HELP)
         self.addParameter(
             QgsProcessingParameterBoolean(
                 "REMOVE_OUTLIERS",
