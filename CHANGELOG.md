@@ -11,6 +11,9 @@
   these do not add runtime dependencies. Require a plugin-level LICENSE before
   building release ZIPs.
 - Keep the experimental designation while broader platform validation is pending.
+- License the plugin under GPL-2.0-or-later, preserving the bundled libraries'
+  original licenses and notices. Record maintainer-confirmed Windows use and
+  visual review alongside the automated macOS validation.
 
 ## 0.4.2 — installation help cleanup
 

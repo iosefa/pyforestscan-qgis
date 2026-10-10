@@ -7,9 +7,10 @@ experimental until the platform checks below support a stable designation.
 
 ## Prepare the release
 
-1. Choose and include a plugin-level GPL-compatible `LICENSE` at the package
-   root. Bundled PyForestScan and laspy retain their original licenses. QGIS
-   requires a file named exactly `LICENSE`, without an extension.
+1. Keep the plugin's GPL-2.0-or-later `LICENSE` at the package root. Bundled
+   PyForestScan (MIT) and laspy (BSD-2-Clause) retain their original licenses
+   and copyright notices. QGIS requires a file named exactly `LICENSE`,
+   without an extension.
 2. Keep the GitHub repository public, enable its Issues feature, and check the
    homepage, repository and tracker URLs in `metadata.txt` while signed out.
    Push the release's source commits so the public repository matches the ZIP.

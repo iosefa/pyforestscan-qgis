@@ -215,3 +215,11 @@ See [CHANGELOG.md](CHANGELOG.md) for migration from 0.1.1 and
 [tests/README.md](tests/README.md) for release verification commands. Maintainers
 can follow the [QGIS publication guide](docs/RELEASING.md) to submit a community
 release.
+
+## License
+
+PyForestScan for QGIS is licensed under [GPL-2.0-or-later](LICENSE).
+Bundled PyForestScan retains its [MIT license](vendor/pyforestscan/LICENSE), and
+laspy retains its [BSD-2-Clause license](vendor/laspy/LICENSE.txt). Their original
+copyright and license notices are included in the plugin. Separately downloaded
+engine packages retain their own licenses.

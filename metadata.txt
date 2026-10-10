@@ -7,6 +7,7 @@ changelog=0.4.3: Validate terrain and CHM raster encoding before height/rumple c
 qgisMinimumVersion=3.40
 qgisMaximumVersion=4.99
 author=Nicholas Rogers, Joseph Percival
+license=GPL-2.0-or-later
 email=ipercival@gmail.com
 category=Analysis
 tags=LiDAR,forestry,forest structure,point cloud,PDAL,PyForestScan

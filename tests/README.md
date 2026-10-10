@@ -328,11 +328,17 @@ vendored dependency licenses. Original source hashes were verified after
 accounting for documented import namespacing; laspy now also has documented
 type-checking imports without new runtime dependencies.
 
-At review time, publication remained blocked on choosing a plugin-level
-license, enabling GitHub Issues, and publishing the matching source revision.
-The package builder now refuses a missing/empty `LICENSE` before replacing
-existing artifacts. This review is not a declaration of public availability.
+The maintainer subsequently confirmed that the plugin works well in their
+Windows work and that they completed a visual review of all tools. This is
+manual Windows validation; the exact QGIS version, backend, architecture and
+individual datasets were not recorded, and no automated Windows run is claimed.
+Earlier release sections above retain the scope known at those reviews.
+
+The maintainer approved GPL-2.0-or-later for the plugin. The release ZIP includes
+its full `LICENSE` and the unchanged third-party license notices. The package
+builder refuses a missing/empty `LICENSE` before replacing existing artifacts.
+Publication still requires enabling GitHub Issues and publishing the matching
+source revision; this review is not a declaration of repository approval.
 See [the publication guide](../docs/RELEASING.md) for the remaining steps.
-Windows engine installation was previously confirmed by the user; Windows
-Processing, Linux execution, Intel macOS, QGIS 4.0, live remote EPT and
-production-sized workloads have not been verified by this local review.
+Linux execution, Intel macOS, QGIS 4.0, live remote EPT and production-sized
+workloads have not been verified by the recorded automated review.
