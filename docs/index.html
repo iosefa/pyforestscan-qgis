@@ -21,7 +21,7 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <body>
 <header>
 <h1>PyForestScan for QGIS</h1>
-<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.3.2, experimental internal release; QGIS 3.40–3.x and 4.x; bundled PyForestScan 0.4.1.</p>
+<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.3.3, experimental internal release; QGIS 3.40–3.x and 4.x; bundled PyForestScan 0.4.1.</p>
 <p>Select a saved point cloud already in your project, add height above ground, and create forest metric rasters. Tools use normal Processing dialogs, batch jobs, and models. This help is included in the plugin and works offline.</p>
 </header>
 <nav aria-label="Help contents">
@@ -47,7 +47,7 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <main>
 <section id="install">
 <h2>Installation</h2>
-<p>Install <code>pyforestscan_qgis.zip</code> through <strong>Plugins → Manage and Install Plugins → Install from ZIP</strong>, enable PyForestScan, then open <strong>Processing → Toolbox</strong>. Run <a href="#checkdependencies">Check PyForestScan Dependencies</a> before your first analysis. If the native checks pass, start using the forest tools. If the selected workflow needs the optional engine, follow the setup steps below. Restart QGIS after upgrading the plugin.</p>
+<p>Install <code>pyforestscan_qgis.zip</code> through <strong>Plugins → Manage and Install Plugins → Install from ZIP</strong>, enable PyForestScan, then open <strong>Processing → Toolbox</strong>. Double-click <a href="#checkdependencies">Check PyForestScan Dependencies</a>, then click <strong>Run</strong> before your first analysis. Read the Log tab or open the generated HTML report in <strong>Processing → Results Viewer</strong>. If the overall status is OK, start using the forest tools. If the selected workflow needs the optional engine, follow the setup steps below. Restart QGIS after upgrading the plugin.</p>
 <p>The ZIP includes the complete pure-Python sources of PyForestScan 0.4.1 and laspy 2.7.0, their licenses, and this offline help. Native processing uses QGIS's PDAL Processing provider, NumPy ≥2.3.1, SciPy ≥1.16, and GDAL Python bindings. It does not need Python PDAL bindings. Native point-cloud workflows require QGIS 4.2 or later for attribute-preserving export and bounded EPT reads. Older versions and statistical outlier cleaning use the optional engine. Capabilities are checked per workflow.</p>
 <p>QGIS 3.40 is the minimum declared version. QGIS 4.x uses the same ZIP. Compatibility metadata through 4.99 does not mean every minor version has been tested; see the included <a href="../tests/README.md">test documentation</a> for the recorded scope. The repository's <code>environment.yml</code> is for developers and tests, not required for community installation.</p>
 </section>
@@ -161,7 +161,8 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <section id="checkdependencies">
 <h2>Check PyForestScan Dependencies</h2>
 <p><code>pyforestscan:checkdependencies</code></p>
-<p>Reports QGIS's native capabilities, bundled PyForestScan version, and the optional engine's status. If an engine is installed, it runs a real HAG, metric, and raster self-test. Overall status is OK when the default native workflow is available or the installed engine passes its test. Missing native capabilities can therefore appear alongside an overall OK status when the engine supplies them. Individual tools check their own requirements when run.</p>
+<p>Double-click this tool to open its Processing dialog, then click <strong>Run</strong>. Leave <strong>PyForestScan dependency report</strong> set to a temporary file, or choose an HTML destination to keep. Results appear in the <strong>Log</strong> tab and in an HTML report accessible through <strong>Processing → Results Viewer</strong>; double-click the report to open it. Versions through 0.3.2 could run silently from the toolbox because this tool had no visible parameters. It is not deprecated.</p>
+<p>Reports QGIS's native capabilities, bundled PyForestScan version, selected backend, and the optional engine's status. If an engine is installed, it runs a real HAG, metric, and raster self-test. With <strong>Automatic</strong> selected, overall status is OK when the native workflow is available or the installed engine passes its test. With <strong>Isolated engine</strong> selected, that engine must pass. Missing native capabilities can therefore appear alongside an overall OK status when the engine supplies them. Individual tools check their own requirements when run. Scripts and models retain the text <code>STATUS</code> output and now also receive the HTML <code>REPORT</code> path.</p>
 <p>This tool reports issues; it does not install packages. Use <a href="#setup">PyForestScan setup</a> to install or repair the private engine. A successful check does not validate a point cloud, its classification, vertical reference, or remote access. Test a small representative crop before a large run.</p>
 </section>
 <section id="interpretation">

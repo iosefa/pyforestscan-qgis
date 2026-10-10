@@ -121,6 +121,8 @@ python -m unittest discover -s tests -p test_worker.py -v
   and failed-write preservation. Calculations use the bundled released core.
 - `test_qgis_runtime.py`: all 11 algorithm registrations (10 visible tools and
   the hidden legacy combined API), parameters and help;
+  visible HTML dependency reports, complete diagnostic logs, backend-specific
+  readiness, engine failures and cancellation;
   loaded LAS/LAZ/COPC layers; persistent HAG with unchanged source bytes, XYZ and
   extra dimensions; DTM coverage/NoData/CRS checks; crop transformations; typed
   outputs and layer-loading requests; all eight combined metrics; focused tools;
@@ -248,3 +250,18 @@ focused tools. Direct checks of QGIS's toolbox and model-builder proxy models
 confirmed that all 10 remaining tools are visible and **Calculate Forest
 Metrics** is hidden in both. The original combined algorithm ID remains
 registered and can still be instantiated. No engine or calculation code changed.
+
+## 0.3.3 dependency-report verification
+
+On macOS Apple Silicon, the packaged plugin passed the 60-test native QGIS
+4.2.3 suite, with the Windows filesystem test and separate worker scientific
+class skipped. All five diagnostic tests also passed on QGIS 3.40.3 / Qt 5.
+The regression checks cover a visible report destination, HTML output type,
+temporary and explicit report files, complete log output, escaped error text,
+selected-backend readiness, engine status errors, and cancellation.
+
+A separate smoke check invoked QGIS 4.2.3's actual toolbox execution handler
+with an isolated temporary profile. Its standard Processing widget opened,
+defaulted to a temporary report, completed a native dependency check, and
+registered the generated HTML file in Processing Results. No private-engine
+or forest-calculation code changed. Windows GUI execution was not tested locally.

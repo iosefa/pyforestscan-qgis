@@ -6,7 +6,7 @@ plant area, foliage height diversity, and other forest structure metrics. The
 plugin uses ordinary Processing dialogs, batch processing, and models; it has no
 separate control panel.
 
-**0.3.2 is an experimental internal release.** It targets QGIS **3.40–3.x and
+**0.3.3 is an experimental internal release.** It targets QGIS **3.40–3.x and
 4.x** with bundled **PyForestScan 0.4.1**. QGIS's own point-cloud tools and
 scientific libraries are used first, with an optional private engine for
 installations that need it. See [tests/README.md](tests/README.md) for verification.
@@ -20,7 +20,10 @@ has been tested. QGIS 4.0 itself has not been runtime-tested.
 2. In QGIS, open **Plugins → Manage and Install Plugins → Install from ZIP**,
    select the ZIP, and enable **PyForestScan**.
 3. Open **Processing → Toolbox**, search for **Check PyForestScan Dependencies**,
-   and run it. If the native checks pass, start using the forest tools.
+   double-click it, and click **Run**. Leave the report destination temporary
+   or choose an HTML file to keep. Read the **Log** tab or open the report in
+   **Processing → Results Viewer**. An overall **OK** means the selected backend
+   supports the primary forest workflows.
 4. If a tool reports that it needs the optional engine, open **Plugins →
    PyForestScan → Set up PyForestScan**, then click **Install engine**. Once
    validation finishes, rerun the tool. No terminal commands are needed.
@@ -142,7 +145,7 @@ and is available from each algorithm's help link.
 | Forest Voxel Statistics | `voxelstatistics` | A selected point dimension summarized per XY column, GeoTIFF |
 | Rumple Index from CHM | `rumpleindex` | Loaded CHM raster → CSV report and numeric result |
 | Process EPT Tiles | `processepttiles` | Advanced tiled CHM, PAI, FHD, or canopy cover outputs |
-| Check PyForestScan Dependencies | `checkdependencies` | Native capability report and installed-engine self-test |
+| Check PyForestScan Dependencies | `checkdependencies` | HTML report and log of native capabilities, selected backend, and installed-engine self-test |
 
 Single-metric raster tools expose `OUTPUT` as a raster destination, so results
 can feed the next step in a Processing model. Choose persistent destinations

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.3 — visible dependency diagnostics
+
+- Fix **Check PyForestScan Dependencies** appearing to do nothing: it now opens
+  a normal Processing dialog and creates an HTML report, available from the
+  Results Viewer. A temporary report is the default; no file selection is needed.
+- Show engine self-test results, engine status errors, the overall outcome,
+  and repair instructions in the Processing log as well as the report.
+- Respect the selected backend when reporting readiness. A broken or missing
+  explicitly selected engine no longer reports OK just because native QGIS
+  capabilities are available. Cancellation does not publish a success report.
+- Keep the existing algorithm ID and text `STATUS` output for scripts/models.
+  Existing engines do not need reinstalling.
+
 ## 0.3.2 — focused toolbox
 
 - Remove **Calculate Forest Metrics** from the Processing Toolbox and model

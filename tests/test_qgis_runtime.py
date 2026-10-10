@@ -2,6 +2,7 @@
 
 import csv
 import hashlib
+from html import escape
 import importlib.util
 import json
 import math
@@ -23,6 +24,7 @@ from qgis.core import (
     QgsPointCloudLayer,
     QgsProcessingContext,
     QgsProcessingFeedback,
+    QgsProcessingOutputHtml,
     QgsProcessingOutputLayerDefinition,
     QgsProcessingUtils,
     QgsProject,
@@ -192,6 +194,7 @@ class QgisRuntimeTests(unittest.TestCase):
             )
         ]
         with (
+            patch.dict(os.environ, {"PYFORESTSCAN_BACKEND": "auto"}),
             patch.object(dependency_check, "check_dependencies", return_value=results),
             patch(
                 "pyforestscan_qgis.runtime.manager.status",
@@ -201,8 +204,12 @@ class QgisRuntimeTests(unittest.TestCase):
             result = self.run_algorithm("checkdependencies", {})
         self.assertTrue(result["STATUS"].startswith("FAIL\n"))
         self.assertIn("library not loaded", result["STATUS"])
+        self.assertIn(
+            escape(result["STATUS"]), Path(result["REPORT"]).read_text(encoding="utf-8")
+        )
 
         with (
+            patch.dict(os.environ, {"PYFORESTSCAN_BACKEND": "auto"}),
             patch.object(dependency_check, "check_dependencies", return_value=results),
             patch(
                 "pyforestscan_qgis.runtime.manager.status",
@@ -216,6 +223,116 @@ class QgisRuntimeTests(unittest.TestCase):
             result = self.run_algorithm("checkdependencies", {})
         self.assertTrue(result["STATUS"].startswith("OK\n"))
         self.assertIn("engine passed", result["STATUS"])
+
+    def test_dependency_report_opens_a_dialog_and_exposes_html(self):
+        algorithm = self.algorithm("checkdependencies")
+        # QGIS executes zero-parameter tools without a dialog and discards STATUS.
+        self.assertGreater(algorithm.countVisibleParameters(), 0)
+        self.assertIsInstance(
+            algorithm.outputDefinition("REPORT"), QgsProcessingOutputHtml
+        )
+        feedback = QgsProcessingFeedback()
+        destination = self.root / "dependency report.html"
+        with (
+            patch.dict(os.environ, {"PYFORESTSCAN_BACKEND": "auto"}),
+            patch.object(
+                dependency_check,
+                "check_dependencies",
+                return_value=[DependencyResult("numpy", "NumPy", True, "2.3.1")],
+            ),
+            patch(
+                "pyforestscan_qgis.runtime.manager.status",
+                return_value={"installed": True},
+            ),
+            patch(
+                "pyforestscan_qgis.runtime.client.call_engine",
+                return_value={"ready": True},
+            ),
+        ):
+            result, ok = algorithm.run(
+                {"REPORT": str(destination)}, self.context, feedback
+            )
+        self.assertTrue(ok, feedback.textLog())
+        self.assertEqual(result["REPORT"], str(destination))
+        self.assertIn("engine passed its processing self-test", feedback.textLog())
+        self.assertIn("OK: Primary forest workflows", feedback.textLog())
+        self.assertIn(escape(result["STATUS"]), destination.read_text(encoding="utf-8"))
+
+    def test_dependency_report_respects_backend_and_shows_engine_failures(self):
+        detail = 'Could not load <engine> & "library"'
+        for backend, expected in (("auto", "OK"), ("native", "OK"), ("engine", "FAIL")):
+            with (
+                self.subTest(backend=backend),
+                patch.dict(os.environ, {"PYFORESTSCAN_BACKEND": backend}),
+                patch.object(
+                    dependency_check,
+                    "check_dependencies",
+                    return_value=[DependencyResult("numpy", "NumPy", True, "2.3.1")],
+                ),
+                patch(
+                    "pyforestscan_qgis.runtime.manager.status",
+                    return_value={"installed": True},
+                ),
+                patch(
+                    "pyforestscan_qgis.runtime.client.call_engine",
+                    side_effect=RuntimeError(detail),
+                ),
+            ):
+                feedback = QgsProcessingFeedback()
+                result, ok = self.algorithm("checkdependencies").run(
+                    {}, self.context, feedback
+                )
+                self.assertTrue(ok, feedback.textLog())
+                self.assertTrue(result["STATUS"].startswith(expected + "\n"))
+                self.assertIn(detail, feedback.textLog())
+                self.assertIn("Set up PyForestScan", feedback.textLog())
+                html = Path(result["REPORT"]).read_text(encoding="utf-8")
+                self.assertIn(escape(detail), html)
+                self.assertNotIn("<engine>", html)
+
+    def test_dependency_report_shows_engine_status_errors(self):
+        with (
+            patch.dict(os.environ, {"PYFORESTSCAN_BACKEND": "engine"}),
+            patch.object(dependency_check, "check_dependencies", return_value=[]),
+            patch(
+                "pyforestscan_qgis.runtime.manager.status",
+                return_value={
+                    "installed": False,
+                    "error": "Unrecognized engine folder",
+                },
+            ),
+        ):
+            feedback = QgsProcessingFeedback()
+            result, ok = self.algorithm("checkdependencies").run(
+                {}, self.context, feedback
+            )
+        self.assertTrue(ok, feedback.textLog())
+        self.assertTrue(result["STATUS"].startswith("FAIL\n"))
+        self.assertIn("Unrecognized engine folder", feedback.textLog())
+
+    def test_dependency_report_cancellation_does_not_publish_a_result(self):
+        from pyforestscan_qgis.runtime.client import EngineCanceled
+
+        destination = self.root / "canceled.html"
+        with (
+            patch.object(dependency_check, "check_dependencies", return_value=[]),
+            patch(
+                "pyforestscan_qgis.runtime.manager.status",
+                return_value={"installed": True},
+            ),
+            patch(
+                "pyforestscan_qgis.runtime.client.call_engine",
+                side_effect=EngineCanceled("Processing was canceled."),
+            ),
+        ):
+            feedback = QgsProcessingFeedback()
+            result, ok = self.algorithm("checkdependencies").run(
+                {"REPORT": str(destination)}, self.context, feedback
+            )
+        self.assertFalse(ok)
+        self.assertEqual(result, {})
+        self.assertIn("canceled", feedback.textLog())
+        self.assertFalse(destination.exists())
 
     def create_point_cloud(self, name="forest.las", normalized=False):
         import numpy as np
