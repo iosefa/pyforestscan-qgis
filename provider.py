@@ -17,6 +17,7 @@ class PyForestScanProvider(QgsProcessingProvider):
         for metric in ("CHM", "PAD", "PAI", "FHD", "canopy cover", "voxel statistic"):
             self.addAlgorithm(CalculateLidarMetricsAlgorithm(metric))
         self.addAlgorithm(RumpleIndexAlgorithm())
+        # Hidden compatibility entry for saved models and processing.run calls.
         self.addAlgorithm(CalculateLidarMetricsAlgorithm())
         self.addAlgorithm(ProcessEptTilesAlgorithm())
 

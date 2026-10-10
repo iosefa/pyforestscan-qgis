@@ -6,7 +6,7 @@ plant area, foliage height diversity, and other forest structure metrics. The
 plugin uses ordinary Processing dialogs, batch processing, and models; it has no
 separate control panel.
 
-**0.3.1 is an experimental internal release.** It targets QGIS **3.40–3.x and
+**0.3.2 is an experimental internal release.** It targets QGIS **3.40–3.x and
 4.x** with bundled **PyForestScan 0.4.1**. QGIS's own point-cloud tools and
 scientific libraries are used first, with an optional private engine for
 installations that need it. See [tests/README.md](tests/README.md) for verification.
@@ -26,7 +26,7 @@ has been tested. QGIS 4.0 itself has not been runtime-tested.
    validation finishes, rerun the tool. No terminal commands are needed.
 
 If Windows engine setup failed in 0.3.0 with `[WinError 3]` under
-`mamba\pkgs\file\...`, install the 0.3.1 ZIP, restart QGIS, and retry **Install
+`mamba\pkgs\file\...`, install the current ZIP, restart QGIS, and retry **Install
 engine**. This release fixes the repeated cache path and Windows cleanup of
 long filenames; verified downloads are reused. An already working engine can
 continue to be used.
@@ -141,14 +141,14 @@ and is available from each algorithm's help link.
 | Canopy Cover | `canopycover` | PAD-derived Beer–Lambert cover fraction, GeoTIFF |
 | Forest Voxel Statistics | `voxelstatistics` | A selected point dimension summarized per XY column, GeoTIFF |
 | Rumple Index from CHM | `rumpleindex` | Loaded CHM raster → CSV report and numeric result |
-| Calculate Forest Metrics | `calculatelidarmetrics` | Several metrics from one read, including point density |
 | Process EPT Tiles | `processepttiles` | Advanced tiled CHM, PAI, FHD, or canopy cover outputs |
 | Check PyForestScan Dependencies | `checkdependencies` | Native capability report and installed-engine self-test |
 
 Single-metric raster tools expose `OUTPUT` as a raster destination, so results
-can feed the next step in a Processing model. The combined tool retains its
-algorithm ID and metric selection order and also exposes individual typed
-outputs. Choose persistent destinations for work you intend to keep.
+can feed the next step in a Processing model. Choose persistent destinations
+for work you intend to keep. The old combined **Calculate Forest Metrics** entry
+is hidden from the toolbox and model builder. Its `calculatelidarmetrics` ID
+remains available so existing models and scripts continue to run.
 
 PAD uses PyForestScan's Beer–Lambert constant of 1. Canopy cover is
 `1 - exp(-k × PAI_above_threshold)`, with default `k = 0.5`; it is not the fraction

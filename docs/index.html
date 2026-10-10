@@ -21,7 +21,7 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <body>
 <header>
 <h1>PyForestScan for QGIS</h1>
-<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.3.1, experimental internal release; QGIS 3.40–3.x and 4.x; bundled PyForestScan 0.4.1.</p>
+<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.3.2, experimental internal release; QGIS 3.40–3.x and 4.x; bundled PyForestScan 0.4.1.</p>
 <p>Select a saved point cloud already in your project, add height above ground, and create forest metric rasters. Tools use normal Processing dialogs, batch jobs, and models. This help is included in the plugin and works offline.</p>
 </header>
 <nav aria-label="Help contents">
@@ -38,7 +38,6 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <li><a href="#canopycover">Canopy Cover</a></li>
 <li><a href="#voxelstatistics">Forest Voxel Statistics</a></li>
 <li><a href="#rumpleindex">Rumple Index from CHM</a></li>
-<li><a href="#calculatelidarmetrics">Calculate Forest Metrics</a></li>
 <li><a href="#processepttiles">Process EPT Tiles</a></li>
 <li><a href="#checkdependencies">Check Dependencies</a></li>
 <li><a href="#interpretation">Interpretation and limits</a></li>
@@ -54,7 +53,7 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 </section>
 <section id="setup">
 <h2>Optional engine setup</h2>
-<p>If Windows setup in 0.3.0 failed with <code>[WinError 3]</code> inside <code>mamba\pkgs\file\...</code>, install this 0.3.1 ZIP, restart QGIS, and click <strong>Install engine</strong> again. Setup reuses verified downloads and handles long cache paths. Existing working engines can continue to be used; no registry change is needed for this correction.</p>
+<p>If Windows setup in 0.3.0 failed with <code>[WinError 3]</code> inside <code>mamba\pkgs\file\...</code>, install the current ZIP, restart QGIS, and click <strong>Install engine</strong> again. Setup reuses verified downloads and handles long cache paths. Existing working engines can continue to be used; no registry change is needed for this correction.</p>
 <ol>
 <li>Open <strong>Plugins → PyForestScan → Set up PyForestScan</strong>. The dialog reports native capabilities and the private engine's status, location, download size, and free-space requirement.</li>
 <li>Click <strong>Install engine</strong>. Keep QGIS open while packages download and the installation is tested. The first installation requires an internet connection; cancellation leaves any previous working engine available.</li>
@@ -143,8 +142,9 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <p>Use a projected metre CRS and heights in metres. At least one complete valid 2×2 patch is required. Rotated rasters must first be warped to a north-up grid; rasters above 20 million cells must be clipped before this in-memory calculation. A flat valid surface has rumple 1; increasing roughness increases the ratio. NoData, threshold masking, raster resolution, and gap filling affect which patches contribute and the resulting value. This is one summary for the input raster, not a per-cell rumple raster.</p>
 </section>
 <section id="calculatelidarmetrics">
-<h2>Calculate Forest Metrics</h2>
+<h2>Legacy combined algorithm</h2>
 <p><code>pyforestscan:calculatelidarmetrics</code></p>
+<p>Since 0.3.2, <strong>Calculate Forest Metrics</strong> is hidden from the toolbox and model builder. Existing models and scripts can still call its unchanged algorithm ID. Use the focused forest tools for new workflows. The following describes the compatibility interface.</p>
 <p>Calculates several outputs from one point-cloud read. Select CHM, PAD, PAI, FHD, canopy cover, point density, rumple, or voxel statistics and choose an output folder. <code>LOAD_OUTPUTS</code> controls whether rasters are added to the project. Existing metric files are protected unless <code>OVERWRITE</code> is enabled. Individual outputs have Processing types so models can consume the selected results.</p>
 <p>The first seven metric indices are retained for existing scripts: CHM 0, PAD 1, PAI 2, FHD 3, canopy cover 4, point density 5, rumple 6. Voxel statistics is appended at 7. The algorithm ID remains stable, but corrected calculations and the dependency upgrade mean numeric equivalence to 0.1.1 is not promised.</p>
 <p>PAD is now <code>pad.tif</code>, with height bands. Point density counts retained returns per square metre; points with negative/nonfinite HAG are excluded, so it may differ from a native density of every source return. Rumple is reported in CSV. The single-metric tools are convenient when building a model with one named output per step.</p>

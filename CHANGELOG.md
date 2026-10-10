@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.2 — focused toolbox
+
+- Remove **Calculate Forest Metrics** from the Processing Toolbox and model
+  builder. Use the focused canopy height, plant area, foliage diversity,
+  canopy cover, voxel statistics, and rumple tools for new workflows.
+- Retain the hidden `pyforestscan:calculatelidarmetrics` algorithm for existing
+  models and scripts, including its combined outputs and point-density option.
+- Update the toolbox list and bundled help. The processing engine and metric
+  calculations are unchanged; an installed engine does not need reinstalling.
+
 ## 0.3.1 — Windows setup fix
 
 - Avoid duplicating the full download directory inside micromamba's package

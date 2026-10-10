@@ -1,7 +1,7 @@
 # PyForestScan 0.4.1 API coverage
 
 This inventory covers every public function defined by the **released
-PyForestScan 0.4.1** Python modules. Plugin 0.3.0 includes the complete released
+PyForestScan 0.4.1** Python modules. The plugin includes the complete released
 source under `vendor/pyforestscan`, with its MIT license and source hashes in
 `vendor/sources.json`. Internal imports are made relative to keep it separate
 from other plugins. A local development checkout is not the release contract.
@@ -19,6 +19,11 @@ function when exact upstream behavior is needed. QGIS provider availability
 varies by installation; these are workflow alternatives, not claims of identical
 algorithms or results.
 
+Since plugin 0.3.2, the combined metric algorithm is hidden from the toolbox
+and model builder and retained only for existing models/scripts. References to
+combined metrics below describe this legacy API, not a separate user-facing
+tool. The focused forest tools are the interface for new analyses.
+
 ## Forest calculations (`pyforestscan.calculate`)
 
 | Public function | Availability in the plugin | Notes |
@@ -29,7 +34,7 @@ algorithms or results.
 | `calculate_fhd` | Tool: Foliage Height Diversity; combined and tiled metrics | Entropy of vertical return proportions. |
 | `calculate_chm` | Tool: Canopy Height Model; combined metrics | Maximum `HeightAboveGround` per XY cell. Interpolation is disabled; use QGIS raster gap filling separately. |
 | `calculate_rumple` | Tool: Rumple Index from CHM; combined metrics | Uses valid adjacent 2×2 CHM patches and physical pixel sizes. Standalone tool accepts a loaded CHM. |
-| `calculate_point_density` | Combined metrics: point density | Exposes retained returns per m². Negative/nonfinite HAG is excluded; use QGIS for general density of all source points. |
+| `calculate_point_density` | Legacy combined API; Python | Retained returns per m²; no dedicated plugin dialog. Negative/nonfinite HAG is excluded; use QGIS for general density of all source points. |
 | `calculate_voxel_stat` | Tool: Forest Voxel Statistics; combined metrics; internal to tiled CHM | Dimension and statistic selection: mean, sum, count, min, max, median, standard deviation. Produces a 2D column statistic, not a 3D voxel cube. Tiled CHM uses maximum HAG on a common grid. |
 | `generate_dtm` | QGIS/Python | Terrain generation is outside the forest-metric tool set. Prepare a suitable terrain raster with QGIS/PDAL, or call the upstream function in Python. |
 | `calculate_canopy_cover` | Tool: Canopy Cover; combined and tiled metrics | PAD-based Beer–Lambert cover; default extinction coefficient 0.5. Replaces the old plugin's return-fraction calculation. |

@@ -105,6 +105,17 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
             METRIC_INFO[self.metric][1] if self.metric else "Calculate Forest Metrics"
         )
 
+    def flags(self):
+        flags = super().flags()
+        if self.metric is None:
+            # Keep existing models/scripts runnable without offering a second
+            # interface alongside the focused forest tools.
+            flags |= (
+                Qgis.ProcessingAlgorithmFlag.HideFromToolbox
+                | Qgis.ProcessingAlgorithmFlag.HideFromModeler
+            )
+        return flags
+
     def group(self):
         return "Forest structure"
 
@@ -118,7 +129,7 @@ class CalculateLidarMetricsAlgorithm(QgsProcessingAlgorithm):
         specific = (
             METRIC_HELP[self.metric]
             if self.metric
-            else "Calculate several forest metrics together, sharing the point-cloud read and voxel grid. PAD is a multiband raster; rumple is a CSV report and numeric result."
+            else "Legacy combined algorithm retained for existing models and scripts. Use the focused forest tools for new workflows. PAD is a multiband raster; rumple is a CSV report and numeric result."
         )
         return (
             f"<p>{specific}</p>"

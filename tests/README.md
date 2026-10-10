@@ -119,7 +119,8 @@ python -m unittest discover -s tests -p test_worker.py -v
   and voxel statistics; non-unit height bins; invalid/negative HAG; degenerate
   grids; allocation limits; GeoTIFF orientation, CRS, NoData, PAD band metadata,
   and failed-write preservation. Calculations use the bundled released core.
-- `test_qgis_runtime.py`: all 11 algorithm registrations, parameters and help;
+- `test_qgis_runtime.py`: all 11 algorithm registrations (10 visible tools and
+  the hidden legacy combined API), parameters and help;
   loaded LAS/LAZ/COPC layers; persistent HAG with unchanged source bytes, XYZ and
   extra dimensions; DTM coverage/NoData/CRS checks; crop transformations; typed
   outputs and layer-loading requests; all eight combined metrics; focused tools;
@@ -228,11 +229,22 @@ remnants, and cache preparation. A Windows-only test creates a real directory
 tree beyond 260 characters and removes it through the owned-generation path;
 it is skipped on macOS. GitHub Actions now runs these guards on Windows for
 every push/PR, independently of the optional full engine installation matrix.
-This configuration is not a recorded passing Windows run. The corrected setup
-still needs confirmation on the reporting Windows machine.
+This configuration is not a recorded passing Windows run. The reporting user
+subsequently confirmed that the corrected setup installs successfully on
+Windows; Windows Processing workflows still need validation.
 
 Local 0.3.1 verification: the packaged plugin passed the 56-test QGIS 4.2.3
 native suite, with the Windows filesystem test and the separate worker
 scientific class skipped. All 11 scientific/protocol worker tests passed in
 the newly installed private engine. Ruff and archive/source consistency checks
 also passed. No point-cloud calculation code changed in this patch release.
+
+## 0.3.2 toolbox verification
+
+On macOS Apple Silicon, the packaged plugin passed the 56-test native QGIS
+4.2.3 suite, with the Windows filesystem test and separate worker scientific
+class skipped. This includes running the hidden combined algorithm and the
+focused tools. Direct checks of QGIS's toolbox and model-builder proxy models
+confirmed that all 10 remaining tools are visible and **Calculate Forest
+Metrics** is hidden in both. The original combined algorithm ID remains
+registered and can still be instantiated. No engine or calculation code changed.
