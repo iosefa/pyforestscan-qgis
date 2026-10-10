@@ -32,6 +32,9 @@ from .vlrs.known import (
 )
 from .vlrs.vlrlist import VLRList
 
+if typing.TYPE_CHECKING:
+    import pyproj
+
 logger = logging.getLogger(__name__)
 
 GENERATING_SOFTWARE_LEN = 32

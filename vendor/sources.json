@@ -21,7 +21,7 @@
     "version": "2.7.0",
     "source": "https://pypi.org/project/laspy/2.7.0/",
     "license_file": "laspy/LICENSE.txt",
-    "changes": "Absolute internal package imports changed to relative imports for namespacing.",
+    "changes": "Absolute internal package imports changed to relative imports for namespacing. TYPE_CHECKING-only imports added for LasHeader in _compression/backend.py, lazrs in _compression/selection.py, and pyproj in header.py so forward annotations resolve during static analysis without introducing runtime dependencies.",
     "original_sha256": {
       "lib.pyi": "dd95e0b204b8eaeaa7b60ef9cba29452bcc067e5f273d55aff80c777f6d371a2",
       "_pointappender.py": "e40e93ae0db10df96bd193c96d171d2652cf01904474911e959dffb83fbf5bd0",
