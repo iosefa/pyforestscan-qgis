@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.3 — community release preparation
+
+- Reject terrain/CHM rasters with nonidentity scale/offset or incompatible
+  vertical units before HAG or rumple calculations can interpret encoded
+  pixel values as metre heights. Explain how to export a suitable raster.
+- Clarify native and optional-engine dependencies in plugin metadata, remove
+  internal-only installation wording, and document QGIS community submission.
+- Fix missing type-only imports in bundled laspy for repository static checks;
+  these do not add runtime dependencies. Require a plugin-level LICENSE before
+  building release ZIPs.
+- Keep the experimental designation while broader platform validation is pending.
+
 ## 0.4.2 — installation help cleanup
 
 - Remove the obsolete Windows 0.3.0 setup notice from installation instructions

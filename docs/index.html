@@ -21,7 +21,7 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <body>
 <header>
 <h1>PyForestScan for QGIS</h1>
-<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.4.2, experimental internal release; QGIS 3.40–3.x and 4.x; bundled PyForestScan 0.4.1.</p>
+<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.4.3, experimental release; QGIS 3.40–3.x and 4.x; bundled PyForestScan 0.4.1.</p>
 <p>Select a saved point cloud already in your project, add height above ground, and create forest metric rasters. Tools use normal Processing dialogs, batch jobs, and models. This help is included in the plugin and works offline.</p>
 </header>
 <nav aria-label="Help contents">
@@ -87,6 +87,7 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 </tbody>
 </table>
 <p class="note">Forest metrics require a projected CRS whose horizontal units are metres. Z, DTM elevations, and HAG must also be in metres and use compatible vertical references. A CRS label cannot convert feet to metres or fix a vertical datum mismatch. Reproject or convert the data with appropriate QGIS tools before analysis.</p>
+<p>Terrain and CHM rasters must store physical metre elevations/heights directly. Rasters with nonidentity band scale/offset or another declared vertical unit are rejected: export values with scale/offset applied and units converted to metres first. If band-unit metadata is absent, confirm the raster values are metres yourself.</p>
 <p>Each single-metric raster tool returns a typed <code>OUTPUT</code> GeoTIFF destination. Use the standard Processing option to load it after completion, or connect the output directly to another model step. Choose persistent paths for outputs you want to retain.</p>
 </section>
 <section id="addheightaboveground">

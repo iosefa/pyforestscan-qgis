@@ -298,3 +298,41 @@ identical with irrelevant hidden settings changed. Ruff and packaged-source
 consistency checks passed. The optional engine package lock is unchanged;
 existing installations do not need reinstalling. Windows GUI testing and
 QGIS 4.0 runtime testing remain outside this local verification.
+
+## 0.4.3 community release review
+
+Local review on 2026-10-09, macOS Apple Silicon, using the staged 0.4.3 code:
+
+| Runtime | Result |
+| --- | --- |
+| QGIS 4.2.3 / Qt 6, native processing | 70 tests, OK with 2 intentional skips |
+| QGIS 3.40.3 / Qt 5, isolated engine | 70 tests, OK with 2 intentional skips |
+| Installed osx-arm64 engine, staged worker | All 15 scientific/protocol tests passed |
+
+The QGIS skips remain the Windows filesystem test and separately executed
+worker scientific class. New regression checks reject terrain and CHM band
+scale/offset and feet-valued rasters without replacing existing outputs. A fresh
+private-engine generation installed from the verified cache and passed its
+real HAG/metric/raster self-test. No engine package lock changed.
+
+Actual QGIS 4.2 Processing widgets were opened and visually reviewed for HAG
+(Delaunay and DTM), canopy cover, EPT tiles, dependency checking and engine
+setup. Labels, help, default coefficient and conditional fields were readable
+and consistent. Ruff and Flake8 critical checks passed, including vendored
+source. Local Bandit and secret scans found only QGIS warning/info rules:
+reviewed subprocess/network/assertion patterns and manifest checksum strings.
+These local scans do not establish QGIS's server-side validation or approval.
+
+The staged package contains all released PyForestScan functions and both
+vendored dependency licenses. Original source hashes were verified after
+accounting for documented import namespacing; laspy now also has documented
+type-checking imports without new runtime dependencies.
+
+At review time, publication remained blocked on choosing a plugin-level
+license, enabling GitHub Issues, and publishing the matching source revision.
+The package builder now refuses a missing/empty `LICENSE` before replacing
+existing artifacts. This review is not a declaration of public availability.
+See [the publication guide](../docs/RELEASING.md) for the remaining steps.
+Windows engine installation was previously confirmed by the user; Windows
+Processing, Linux execution, Intel macOS, QGIS 4.0, live remote EPT and
+production-sized workloads have not been verified by this local review.

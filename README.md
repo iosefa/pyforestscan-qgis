@@ -6,7 +6,7 @@ plant area, foliage height diversity, and other forest structure metrics. The
 plugin uses ordinary Processing dialogs, batch processing, and models; it has no
 separate control panel.
 
-**0.4.2 is an experimental internal release.** It targets QGIS **3.40–3.x and
+**0.4.3 is an experimental release.** It targets QGIS **3.40–3.x and
 4.x** with bundled **PyForestScan 0.4.1**. QGIS's own point-cloud tools and
 scientific libraries are used first, with an optional private engine for
 installations that need it. See [tests/README.md](tests/README.md) for verification.
@@ -15,7 +15,7 @@ has been tested. QGIS 4.0 itself has not been runtime-tested.
 
 ## Install
 
-1. Obtain the internal `pyforestscan_qgis.zip`, or build it with
+1. Obtain the release ZIP (`pyforestscan_qgis-0.4.3.zip`), or build it with
    `scripts/package_plugin.sh` (output: `dist/pyforestscan_qgis.zip`).
 2. In QGIS, open **Plugins → Manage and Install Plugins → Install from ZIP**,
    select the ZIP, and enable **PyForestScan**.
@@ -60,7 +60,7 @@ its capability checks pass, even without an engine build for that platform.
 | Windows x64 | 306 MB | 3.7 GB |
 | Linux x64 | 228 MB | 2.8 GB |
 
-These are decimal sizes for the pinned 0.3.0 manifests, rounded up. On the tested
+These are decimal sizes for the pinned engine `0.4.1-1` manifests, rounded up. On the tested
 Apple Silicon installation, the engine occupies about 702 MB, plus 171 MB of
 cached downloads. Setup removes its unpacking cache after validation. Previous
 working generations remain until **Remove engine**, so repairs can use more
@@ -204,7 +204,14 @@ from a measured zero. Missing terrain coverage stops HAG processing. Inspect
 coverage and the Processing log before interpreting a raster. Rumple requires valid adjacent
 2×2 CHM patches, and changes with raster resolution and gap filling.
 
+Terrain and CHM rasters must store physical metre elevations/heights directly.
+Rasters declaring another vertical unit or a nonidentity band scale/offset are
+rejected. Export the raster with scale/offset applied and values converted to
+metres before using it for HAG or rumple; changing its CRS alone does not convert
+the pixel values. If the raster has no band-unit metadata, confirm the values
+are metres yourself.
+
 See [CHANGELOG.md](CHANGELOG.md) for migration from 0.1.1 and
-[tests/README.md](tests/README.md) for release verification commands. This release
-is prepared for internal distribution, not publication in the public plugin
-repository.
+[tests/README.md](tests/README.md) for release verification commands. Maintainers
+can follow the [QGIS publication guide](docs/RELEASING.md) to submit a community
+release.

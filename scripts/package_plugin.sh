@@ -7,10 +7,16 @@ DIST_DIR="${ROOT_DIR}/dist"
 BUILD_DIR="${DIST_DIR}/${PLUGIN_ID}"
 ZIP_FILE="${DIST_DIR}/${PLUGIN_ID}.zip"
 
+if [[ ! -s "${ROOT_DIR}/LICENSE" ]]; then
+  echo "A plugin-level LICENSE is required before building a release ZIP. Choose a GPL-compatible license and save its full text as LICENSE." >&2
+  exit 1
+fi
+
 rm -rf "${BUILD_DIR}" "${ZIP_FILE}"
 mkdir -p "${BUILD_DIR}"
 
 cp "${ROOT_DIR}/metadata.txt" "${BUILD_DIR}/"
+cp "${ROOT_DIR}/LICENSE" "${BUILD_DIR}/"
 cp "${ROOT_DIR}/README.md" "${BUILD_DIR}/"
 cp "${ROOT_DIR}/CHANGELOG.md" "${BUILD_DIR}/"
 cp "${ROOT_DIR}/environment.yml" "${BUILD_DIR}/"
