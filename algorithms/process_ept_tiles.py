@@ -56,11 +56,13 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
         return (
             "<p>Process a loaded EPT layer, local ept.json, or remote EPT URL one tile at a time. "
             "Choose CHM, PAI, FHD, or PAD-derived canopy cover. Results are GeoTIFFs on a common "
-            "grid in the source's projected metre CRS.</p>"
+            "grid in the source's projected metre CRS. The source must already contain a "
+            "<b>HeightAboveGround</b> dimension. Create it with QGIS or PyForestScan's "
+            "Add Height Above Ground before calculating forest metrics.</p>"
             "<p>Tile dimensions must be whole multiples of the XY cell size. The output extent "
             "is snapped outward to the grid. Points are clipped to the study area; edge cells "
             "can extend beyond it and cells without retained points are NoData. "
-            "Buffer points supply context for height normalization and are excluded from the "
+            "When outlier removal is enabled, buffer points supply filtering context and are excluded from the "
             "core tile metrics. CHM uses the maximum HeightAboveGround per globally aligned cell, "
             "without gap interpolation. Empty tiles are skipped.</p>"
             "<p>New files only are returned. Existing tile files cause an error unless Overwrite "
@@ -69,16 +71,19 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
             "Use QGIS Build Virtual Raster to view many tiles together.</p>"
         )
 
-    def _number(self, name, label, default, minimum=0.0):
-        self.addParameter(
-            QgsProcessingParameterNumber(
-                name,
-                label,
-                Qgis.ProcessingNumberParameterType.Double,
-                defaultValue=default,
-                minValue=minimum,
-            )
+    def _number(self, name, label, default, minimum=0.0, when=None):
+        parameter = QgsProcessingParameterNumber(
+            name,
+            label,
+            Qgis.ProcessingNumberParameterType.Double,
+            defaultValue=default,
+            minValue=minimum,
         )
+        if when is not None:
+            from .parameter_widgets import show_parameter_when
+
+            show_parameter_when(parameter, *when)
+        self.addParameter(parameter)
 
     def initAlgorithm(self, config=None):
         add_point_cloud_parameters(
@@ -89,24 +94,45 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
         )
         self._number("TILE_WIDTH", "Tile width (m)", 100, 0.000001)
         self._number("TILE_HEIGHT", "Tile height (m)", 100, 0.000001)
-        self._number("BUFFER_FRACTION", "Buffer fraction for height normalization", 0.1)
         self.addParameter(
             QgsProcessingParameterEnum(
                 "METRIC", "Metric", self.METRIC_OPTIONS, defaultValue=0
             )
         )
         self._number("VOXEL_XY", "XY grid cell size (m)", 1, 0.000001)
-        self._number("VOXEL_Z", "Height bin size (m)", 1, 0.000001)
-        self._number("MIN_HEIGHT", "Minimum height for PAI (m)", 1)
-        self._number("FHD_MIN_HEIGHT", "Minimum height for FHD (m)", 0)
-        self._number("COVER_MIN_HEIGHT", "Minimum height for canopy cover (m)", 2)
-        self._number("COVER_K", "Canopy cover extinction coefficient", 0.5)
+        self._number(
+            "VOXEL_Z", "Height bin size (m)", 1, 0.000001, when=("METRIC", [1, 2, 3])
+        )
+        self._number(
+            "MIN_HEIGHT", "Minimum height for PAI (m)", 1, when=("METRIC", [1])
+        )
+        self._number(
+            "FHD_MIN_HEIGHT", "Minimum height for FHD (m)", 0, when=("METRIC", [2])
+        )
+        self._number(
+            "COVER_MIN_HEIGHT",
+            "Minimum height for canopy cover (m)",
+            2,
+            when=("METRIC", [3]),
+        )
+        self._number(
+            "COVER_K",
+            "Canopy cover extinction coefficient",
+            0.5,
+            when=("METRIC", [3]),
+        )
         self.addParameter(
             QgsProcessingParameterBoolean(
                 "REMOVE_OUTLIERS",
-                "Remove statistical outliers before height normalization",
+                "Remove statistical outliers before calculating metrics",
                 defaultValue=False,
             )
+        )
+        self._number(
+            "BUFFER_FRACTION",
+            "Buffer fraction for outlier filtering",
+            0.1,
+            when=("REMOVE_OUTLIERS", [True]),
         )
         self.addParameter(
             QgsProcessingParameterFolderDestination("OUTPUT_FOLDER", "Output folder")
@@ -199,9 +225,17 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
         def number(key):
             return self.parameterAsDouble(parameters, key, context)
 
-        xy, dz = number("VOXEL_XY"), number("VOXEL_Z")
+        metric = self.METRIC_OPTIONS[
+            self.parameterAsEnum(parameters, "METRIC", context)
+        ]
+        xy = number("VOXEL_XY")
+        dz = 1.0 if metric == "CHM" else number("VOXEL_Z")
         width, height = number("TILE_WIDTH"), number("TILE_HEIGHT")
-        buffer = number("BUFFER_FRACTION")
+        buffer = (
+            number("BUFFER_FRACTION")
+            if self.parameterAsBool(parameters, "REMOVE_OUTLIERS", context)
+            else 0.0
+        )
         if not all(
             math.isfinite(value) and value > 0 for value in (xy, dz, width, height)
         ) or not math.isfinite(buffer):
@@ -256,9 +290,6 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
             raise QgsProcessingException(
                 "The request exceeds 100,000 tiles. Limit the study extent or increase tile size."
             )
-        metric = self.METRIC_OPTIONS[
-            self.parameterAsEnum(parameters, "METRIC", context)
-        ]
         suffix = {"canopy cover": "cover"}.get(metric, metric.lower())
         folder = ensure_output_folder(
             self.parameterAsString(parameters, "OUTPUT_FOLDER", context)
@@ -356,10 +387,16 @@ class ProcessEptTilesAlgorithm(QgsProcessingAlgorithm):
                         [requested],
                         xy_resolution=xy,
                         z_resolution=dz,
-                        min_height=number("MIN_HEIGHT"),
-                        fhd_min_height=number("FHD_MIN_HEIGHT"),
-                        cover_min_height=number("COVER_MIN_HEIGHT"),
-                        cover_k=number("COVER_K"),
+                        min_height=number("MIN_HEIGHT") if metric == "PAI" else 1,
+                        fhd_min_height=number("FHD_MIN_HEIGHT")
+                        if metric == "FHD"
+                        else 0,
+                        cover_min_height=(
+                            number("COVER_MIN_HEIGHT")
+                            if metric == "canopy cover"
+                            else 2
+                        ),
+                        cover_k=number("COVER_K") if metric == "canopy cover" else 0.5,
                         voxel_dimension="HeightAboveGround",
                         voxel_stat="max",
                         feedback=feedback,

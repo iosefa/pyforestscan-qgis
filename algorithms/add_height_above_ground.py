@@ -66,7 +66,9 @@ class AddHeightAboveGroundAlgorithm(QgsProcessingAlgorithm):
         )
 
     def initAlgorithm(self, config=None):
-        add_point_cloud_parameters(self, hag=False)
+        from .parameter_widgets import show_parameter_when
+
+        add_point_cloud_parameters(self)
         self.addParameter(
             QgsProcessingParameterEnum(
                 self.HAG_METHOD,
@@ -76,8 +78,12 @@ class AddHeightAboveGroundAlgorithm(QgsProcessingAlgorithm):
             )
         )
         self.addParameter(
-            QgsProcessingParameterRasterLayer(
-                self.DTM, "Terrain raster for DTM method", optional=True
+            show_parameter_when(
+                QgsProcessingParameterRasterLayer(
+                    self.DTM, "Terrain raster for DTM method", optional=True
+                ),
+                self.HAG_METHOD,
+                [1],
             )
         )
         self.addParameter(

@@ -15,6 +15,7 @@ from urllib.request import urlopen
 
 from ..algorithms.metric_engine import (
     MAX_RASTER_CELLS,
+    MISSING_HAG_MESSAGE,
     MetricResult,
     compute_metrics,
     write_metric_raster,
@@ -82,6 +83,23 @@ def _prepared(value, metres=False):
     if prepared.get("hag_method", "none") not in ("none", "delaunay", "dtm"):
         raise ValueError("Unknown height above ground method.")
     _crs(prepared["crs_wkt"], metres=metres)
+    return prepared
+
+
+def _metric_prepared(value):
+    prepared = _prepared(value, metres=True)
+    if (
+        prepared.get("hag_method", "none") != "none"
+        or prepared.get("dtm_path")
+        or any(
+            stage["type"].startswith("filters.hag_") for stage in prepared["filters"]
+        )
+    ):
+        raise ValueError(
+            "Forest metrics require a saved HeightAboveGround dimension. "
+            "Run Add Height Above Ground separately and select its output; "
+            "inline height preparation is not supported."
+        )
     return prepared
 
 
@@ -308,7 +326,7 @@ def hag(payload, feedback):
 
 
 def metrics(payload, feedback):
-    prepared = _prepared(payload["prepared"], metres=True)
+    prepared = _metric_prepared(payload["prepared"])
     paths = dict(payload["paths"])
     selected = payload["metrics"]
     if not selected or any(name not in paths for name in selected):
@@ -426,7 +444,7 @@ def _ept_bounds(path):
 def tiles(payload, feedback):
     import numpy as np
 
-    prepared = _prepared(payload["prepared"], metres=True)
+    prepared = _metric_prepared(payload["prepared"])
     if prepared["reader"]["type"] != "readers.ept":
         raise ValueError("Tiled processing requires an EPT point cloud.")
     options = dict(payload.get("options", {}))
@@ -441,15 +459,39 @@ def tiles(payload, feedback):
         "COVER_MIN_HEIGHT": 2,
         "COVER_K": 0.5,
     }
+    names = ["CHM", "PAI", "FHD", "canopy cover"]
+    choice = options.get("METRIC", 0)
+    metric = (
+        names[choice]
+        if isinstance(choice, int) and 0 <= choice < len(names)
+        else choice
+    )
+    if metric not in names:
+        raise ValueError("Choose CHM, PAI, FHD or canopy cover for EPT tiling.")
 
     def number(key):
         return float(options.get(key, defaults[key]))
 
-    xy, dz = number("VOXEL_XY"), number("VOXEL_Z")
+    xy = number("VOXEL_XY")
+    # CHM is a column maximum. Its hidden height-bin setting must not control
+    # the core's auxiliary height-edge allocation.
+    dz = 1 if metric == "CHM" else number("VOXEL_Z")
+    threshold_parameters = {
+        "CHM": {},
+        "PAI": {"min_height": "MIN_HEIGHT"},
+        "FHD": {"fhd_min_height": "FHD_MIN_HEIGHT"},
+        "canopy cover": {
+            "cover_min_height": "COVER_MIN_HEIGHT",
+            "cover_k": "COVER_K",
+        },
+    }
+    thresholds = {
+        name: number(key) for name, key in threshold_parameters[metric].items()
+    }
     width, height, buffer = (
         number("TILE_WIDTH"),
         number("TILE_HEIGHT"),
-        number("BUFFER_FRACTION"),
+        number("BUFFER_FRACTION") if options.get("REMOVE_OUTLIERS", False) else 0,
     )
     if (
         not all(math.isfinite(v) and v > 0 for v in (xy, dz, width, height))
@@ -503,15 +545,6 @@ def tiles(payload, feedback):
     nx, ny = (x1 - x0 + columns - 1) // columns, (y1 - y0 + rows - 1) // rows
     if nx * ny > 100_000:
         raise ValueError("The request exceeds 100,000 tiles; limit the study area.")
-    names = ["CHM", "PAI", "FHD", "canopy cover"]
-    choice = options.get("METRIC", 0)
-    metric = (
-        names[choice]
-        if isinstance(choice, int) and 0 <= choice < len(names)
-        else choice
-    )
-    if metric not in names:
-        raise ValueError("Choose CHM, PAI, FHD or canopy cover for EPT tiling.")
     suffix = "cover" if metric == "canopy cover" else metric.lower()
     folder = os.path.abspath(payload["folder"])
     paths = {
@@ -526,7 +559,6 @@ def tiles(payload, feedback):
         raise ValueError(
             "Tile files already exist; choose a new folder or enable overwrite."
         )
-    os.makedirs(folder, exist_ok=True)
     created = []
     for index, ((i, j), path) in enumerate(paths.items()):
         lx, by = x0 + i * columns, y0 + j * rows
@@ -553,26 +585,22 @@ def tiles(payload, feedback):
             if not (stage["type"] == "filters.crop" and "bounds" in stage)
         ]
         if options.get("REMOVE_OUTLIERS", False):
-            position = next(
-                (
-                    n
-                    for n, stage in enumerate(tile["filters"])
-                    if stage["type"].startswith("filters.hag")
-                ),
-                len(tile["filters"]),
+            tile["filters"].extend(
+                [
+                    {
+                        "type": "filters.outlier",
+                        "method": "statistical",
+                        "mean_k": 8,
+                        "multiplier": 3,
+                    },
+                    {"type": "filters.expression", "expression": "Classification != 7"},
+                ]
             )
-            tile["filters"][position:position] = [
-                {
-                    "type": "filters.outlier",
-                    "method": "statistical",
-                    "mean_k": 8,
-                    "multiplier": 3,
-                },
-                {"type": "filters.expression", "expression": "Classification != 7"},
-            ]
         feedback.pushInfo(f"Tile {index + 1}/{len(paths)} ({i}, {j})")
         points = read_points(tile, feedback, allow_empty=True)
         if points.size:
+            if "HeightAboveGround" not in (points.dtype.names or ()):
+                raise ValueError(MISSING_HAG_MESSAGE)
             # Classify boundaries on integer grid indices. Floating tile edges
             # such as 3 * .1 otherwise send X=.3 to the preceding tile.
             keep = (
@@ -604,13 +632,10 @@ def tiles(payload, feedback):
                 [requested],
                 xy_resolution=xy,
                 z_resolution=dz,
-                min_height=number("MIN_HEIGHT"),
-                fhd_min_height=number("FHD_MIN_HEIGHT"),
-                cover_min_height=number("COVER_MIN_HEIGHT"),
-                cover_k=number("COVER_K"),
                 voxel_dimension="HeightAboveGround",
                 voxel_stat="max",
                 feedback=feedback,
+                **thresholds,
             )[requested]
             grid = np.full((rx - lx, ty - by), np.nan)
             col, row = (

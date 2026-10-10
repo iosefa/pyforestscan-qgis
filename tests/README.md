@@ -12,7 +12,9 @@ existing HAG layer: older native conversion writers can drop extra dimensions.
 Raster-only rumple may use the QGIS libraries when its dependencies are present.
 
 Fixtures use generated local point clouds, temporary outputs, and an isolated
-QGIS profile. Rasterio is a **test-only** dependency for fixture creation and
+QGIS profile. Widget and integration tests share one QGIS application for the
+process; recreating Qt's application between classes is unsupported. Rasterio
+is a **test-only** dependency for fixture creation and
 independent raster assertions; plugin raster operations use QGIS's GDAL bindings.
 
 ## Native QGIS tests
@@ -123,6 +125,8 @@ python -m unittest discover -s tests -p test_worker.py -v
   the hidden legacy combined API), parameters and help;
   visible HTML dependency reports, complete diagnostic logs, backend-specific
   readiness, engine failures and cancellation;
+  required exact `HeightAboveGround`, rejection of inline preparation requests,
+  reuse of saved heights, and inactive tiled metric settings;
   loaded LAS/LAZ/COPC layers; persistent HAG with unchanged source bytes, XYZ and
   extra dimensions; DTM coverage/NoData/CRS checks; crop transformations; typed
   outputs and layer-loading requests; all eight combined metrics; focused tools;
@@ -133,6 +137,11 @@ python -m unittest discover -s tests -p test_worker.py -v
   LAS → HAG → PAI → GeoTIFF self-test; metadata; preserved dimensions/precision;
   output folders containing `#`; DTM failure rollback; physical units; raster
   CRS checks; all point views; fractional tile placement and overwrite guards.
+  Metric/tile jobs reject inline height preparation and missing HAG; inactive
+  tiled settings do not affect CHM, and validation preserves existing outputs.
+- `test_parameter_widgets.py`: real Processing panels on Qt 5/6; conditional
+  DTM, metric settings and outlier buffer; retained values after switching;
+  standard batch widgets and modeler parameter-source choices.
 - `test_engine_manager.py`: trusted package manifests, checksum verification,
   download caching, ownership/symlink/deletion boundaries, repair rollback,
   activation only after a successful self-test, sanitized process environments,
@@ -265,3 +274,27 @@ with an isolated temporary profile. Its standard Processing widget opened,
 defaulted to a temporary report, completed a native dependency check, and
 registered the generated HTML file in Processing Results. No private-engine
 or forest-calculation code changed. Windows GUI execution was not tested locally.
+
+## 0.4.0 prepared-height workflow verification
+
+Local verification of the staged plugin on macOS Apple Silicon:
+
+| Runtime | Result |
+| --- | --- |
+| QGIS 4.2.3 / Qt 6, native processing | 69-test suite passed, 2 intentional skips |
+| QGIS 3.40.3 / Qt 5, isolated engine | 69-test suite passed, 2 intentional skips |
+| Installed osx-arm64 engine, staged worker | All 14 scientific/protocol tests passed |
+
+The QGIS skips are the Windows filesystem regression and worker scientific
+class, which runs separately. Both QGIS suites include five tests of real
+Processing parameter panels, covering dynamic field visibility and preserved
+batch/modeler controls. QGIS 4.2's actual Processing widgets were also opened,
+switched between methods, and visually checked for HAG, canopy cover, and EPT.
+
+Processing checks reject missing or similarly named HAG dimensions, reject
+normalized Z as a substitute, preserve existing HAG values, and prevent old
+inline-HAG arguments from changing that behavior. Tiled CHM results stay
+identical with irrelevant hidden settings changed. Ruff and packaged-source
+consistency checks passed. The optional engine package lock is unchanged;
+existing installations do not need reinstalling. Windows GUI testing and
+QGIS 4.0 runtime testing remain outside this local verification.

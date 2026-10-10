@@ -158,6 +158,18 @@ class WorkerScientificTests(unittest.TestCase):
         }
         return prepared
 
+    def saved_hag_fixture(self, directory):
+        prepared = self.fixture(directory)
+        output = os.path.join(directory, "with-height.las")
+        jobs.hag({"prepared": prepared, "output": output}, QuietFeedback())
+        return dict(
+            prepared,
+            path=output,
+            reader={"type": "readers.las", "filename": output},
+            filters=[],
+            hag_method="none",
+        )
+
     def test_actual_selftest_in_isolated_subprocess(self):
         process, result = self.execute(
             {"protocol": 1, "operation": "selftest", "payload": {}}
@@ -197,7 +209,7 @@ class WorkerScientificTests(unittest.TestCase):
 
     def test_metric_outputs_and_stored_raster_crs(self):
         with tempfile.TemporaryDirectory() as directory:
-            prepared = self.fixture(directory)
+            prepared = self.saved_hag_fixture(directory)
             paths = {
                 name: os.path.join(directory, name + ".tif") for name in ("PAI", "PAD")
             }
@@ -240,6 +252,78 @@ class WorkerScientificTests(unittest.TestCase):
                     },
                     QuietFeedback(),
                 )
+
+    def test_metrics_require_saved_hag_and_preserve_existing_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prepared = self.fixture(directory)
+            prepared.update(filters=[], hag_method="none")
+            output = Path(directory) / "untouched.tif"
+            original = b"An existing output must survive validation failure."
+            output.write_bytes(original)
+            with self.assertRaisesRegex(ValueError, "missing the HeightAboveGround"):
+                jobs.metrics(
+                    {
+                        "prepared": prepared,
+                        "metrics": ["canopy cover"],
+                        "paths": {"canopy cover": str(output)},
+                    },
+                    QuietFeedback(),
+                )
+            self.assertEqual(output.read_bytes(), original)
+            self.assertFalse(list(Path(directory).glob(".pyforestscan-*")))
+
+    def test_metric_and_tile_jobs_reject_inline_hag_before_reading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = self.fixture(directory)
+            source.update(filters=[], hag_method="none")
+            output = Path(directory) / "new-output" / "metric.tif"
+            cases = (
+                {"hag_method": "delaunay"},
+                {"hag_method": "dtm"},
+                {"dtm_path": "terrain.tif"},
+                {"filters": [{"type": "filters.hag_delaunay"}]},
+                {"filters": [{"type": "filters.hag_dem", "raster": "terrain.tif"}]},
+            )
+            for operation in (jobs.metrics, jobs.tiles):
+                for settings in cases:
+                    with self.subTest(operation=operation.__name__, settings=settings):
+                        with patch.object(jobs, "read_points") as reader:
+                            with self.assertRaisesRegex(
+                                ValueError, "Run Add Height Above Ground separately"
+                            ):
+                                operation(
+                                    {
+                                        "prepared": dict(source, **settings),
+                                        "metrics": ["PAI"],
+                                        "paths": {"PAI": str(output)},
+                                        "folder": str(output.parent),
+                                    },
+                                    QuietFeedback(),
+                                )
+                            reader.assert_not_called()
+                        self.assertFalse(output.parent.exists())
+
+    def test_tiles_reject_missing_hag_before_creating_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = self.fixture(directory)
+            pipeline = pdal.Pipeline(json.dumps([source["reader"]]))
+            pipeline.execute()
+            source.update(
+                path="dummy-ept.json",
+                reader={"type": "readers.ept", "filename": "dummy-ept.json"},
+                filters=[],
+                hag_method="none",
+                bounds=[[500000, 500003], [4100000, 4100003]],
+            )
+            folder = Path(directory) / "new-tiles"
+            with patch.object(jobs, "read_points", return_value=pipeline.arrays[0]):
+                with self.assertRaisesRegex(
+                    ValueError, "missing the HeightAboveGround"
+                ):
+                    jobs.tiles(
+                        {"prepared": source, "folder": str(folder)}, QuietFeedback()
+                    )
+            self.assertFalse(folder.exists())
 
     def test_multiple_point_views_are_preserved(self):
         points = np.array(
@@ -342,7 +426,9 @@ class WorkerScientificTests(unittest.TestCase):
                     "VOXEL_XY": 0.1,
                     "TILE_WIDTH": 0.3,
                     "TILE_HEIGHT": 0.3,
-                    "BUFFER_FRACTION": 0,
+                    # An unused legacy value must not affect a dialog where
+                    # outlier removal and its dependent buffer are disabled.
+                    "BUFFER_FRACTION": math.nan,
                 },
             }
             with patch.object(jobs, "read_points", return_value=points):
@@ -360,6 +446,20 @@ class WorkerScientificTests(unittest.TestCase):
             first = second = None
             with self.assertRaisesRegex(ValueError, "already exist"):
                 jobs.tiles(payload, QuietFeedback())
+            payload["options"].update(
+                OVERWRITE=True,
+                VOXEL_Z=1e-30,
+                MIN_HEIGHT=-1,
+                FHD_MIN_HEIGHT=math.nan,
+                COVER_MIN_HEIGHT="unused",
+                COVER_K=math.inf,
+            )
+            with patch.object(jobs, "read_points", return_value=points):
+                repeated = jobs.tiles(payload, QuietFeedback())
+            for path, expected in zip(repeated["files"], (a, b)):
+                dataset = gdal.Open(path)
+                np.testing.assert_array_equal(dataset.ReadAsArray(), expected)
+                dataset = None
 
 
 if __name__ == "__main__":

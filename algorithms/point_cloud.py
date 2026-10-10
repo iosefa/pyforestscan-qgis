@@ -11,14 +11,14 @@ from qgis.core import (
     QgsProcessing,
     QgsProcessingException,
     QgsProcessingParameterCrs,
-    QgsProcessingParameterEnum,
     QgsProcessingParameterExtent,
     QgsProcessingParameterFeatureSource,
     QgsProcessingParameterPointCloudLayer,
-    QgsProcessingParameterRasterLayer,
     QgsProcessingParameterString,
     QgsProviderRegistry,
 )
+
+from .metric_engine import MISSING_HAG_MESSAGE
 
 
 @dataclass(frozen=True)
@@ -41,7 +41,7 @@ class PreparedPointCloud:
 
 
 def add_point_cloud_parameters(
-    algorithm, hag=True, crop=True, input_name="INPUT", crs_name="INPUT_CRS"
+    algorithm, crop=True, input_name="INPUT", crs_name="INPUT_CRS"
 ):
     algorithm.addParameter(
         QgsProcessingParameterPointCloudLayer(
@@ -70,20 +70,6 @@ def add_point_cloud_parameters(
                 "Crop polygon layer",
                 [QgsProcessing.SourceType.TypeVectorPolygon],
                 optional=True,
-            )
-        )
-    if hag:
-        algorithm.addParameter(
-            QgsProcessingParameterEnum(
-                "HAG_METHOD",
-                "Height above ground",
-                ["none", "delaunay", "dtm"],
-                defaultValue=0,
-            )
-        )
-        algorithm.addParameter(
-            QgsProcessingParameterRasterLayer(
-                "DTM", "Terrain raster for DTM height above ground", optional=True
             )
         )
 
@@ -252,7 +238,7 @@ def prepare_point_cloud(
     parameters,
     context,
     feedback,
-    hag_method=None,
+    hag_method="none",
     input_name="INPUT",
     crs_name="INPUT_CRS",
     backend="native",
@@ -262,6 +248,8 @@ def prepare_point_cloud(
         raise QgsProcessingException("Processing canceled.")
     if backend not in ("native", "engine"):
         raise QgsProcessingException("Unknown point cloud processing backend.")
+    if hag_method not in ("none", "delaunay", "dtm"):
+        raise QgsProcessingException("Unknown height above ground method.")
     supplied_layer = _provided(parameters, "INPUT_LAYER")
     path = algorithm.parameterAsString(parameters, input_name, context).strip()
     if supplied_layer and path:
@@ -305,6 +293,11 @@ def prepare_point_cloud(
     path = _source_path(path)
     reader = {"type": point_cloud_reader(path), "filename": path}
     info = _metadata(reader, backend, context, feedback)
+    dimensions = info.get("dimensions") or ()
+    if isinstance(dimensions, str):
+        dimensions = {name.strip() for name in dimensions.split(",")}
+    if hag_method == "none" and "HeightAboveGround" not in dimensions:
+        raise QgsProcessingException(MISSING_HAG_MESSAGE)
     if backend == "native" and reader["type"] == "readers.ept":
         feedback.pushInfo(
             "QGIS stages EPT points through LAS. Floating-coordinate EPT without stored "
@@ -360,15 +353,9 @@ def prepare_point_cloud(
     polygon = _crop_polygon(algorithm, parameters, context, crs)
     if polygon:
         filters.append({"type": "filters.crop", "polygon": polygon})
-    if hag_method is None:
-        hag_method = ["none", "delaunay", "dtm"][
-            algorithm.parameterAsEnum(parameters, "HAG_METHOD", context)
-        ]
-    if hag_method not in ("none", "delaunay", "dtm"):
-        raise QgsProcessingException("Unknown height above ground method.")
     dtm_path = None
     if hag_method == "delaunay":
-        if "Classification" not in info.get("dimensions", ""):
+        if "Classification" not in dimensions:
             raise QgsProcessingException(
                 "Delaunay height above ground requires points classified as ground (class 2)."
             )
@@ -394,7 +381,7 @@ def prepare_point_cloud(
 
 
 def with_point_cloud_bounds(prepared, bounds):
-    """Replace the read window while retaining polygon/HAG stages for a buffered tile."""
+    """Replace the read window while retaining other stages for a buffered tile."""
     reader = dict(prepared.reader)
     filters = [
         dict(stage)
@@ -417,6 +404,10 @@ def validate_points(points, prepared, feedback=None):
         raise QgsProcessingException(
             "No points were returned for the selected source and crop."
         )
+    if prepared.hag_method == "none" and "HeightAboveGround" not in (
+        points.dtype.names or ()
+    ):
+        raise QgsProcessingException(MISSING_HAG_MESSAGE)
     if not all(np.isfinite(points[name]).all() for name in ("X", "Y", "Z")):
         raise QgsProcessingException("The point cloud contains nonfinite coordinates.")
     if prepared.hag_method != "none":

@@ -21,7 +21,7 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <body>
 <header>
 <h1>PyForestScan for QGIS</h1>
-<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.3.3, experimental internal release; QGIS 3.40–3.x and 4.x; bundled PyForestScan 0.4.1.</p>
+<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.4.0, experimental internal release; QGIS 3.40–3.x and 4.x; bundled PyForestScan 0.4.1.</p>
 <p>Select a saved point cloud already in your project, add height above ground, and create forest metric rasters. Tools use normal Processing dialogs, batch jobs, and models. This help is included in the plugin and works offline.</p>
 </header>
 <nav aria-label="Help contents">
@@ -67,11 +67,12 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <h2>First layer workflow</h2>
 <ol>
 <li>Add a LAS/LAZ/COPC or EPT point cloud to the Layers panel. Check its CRS and classification.</li>
-<li>Open <strong>Add Height Above Ground</strong>, choose the point cloud layer, and select Delaunay or a DTM. Save a new LAS/LAZ file and enable QGIS's option to load the result.</li>
-<li>Open a forest metric such as <strong>Canopy Height Model</strong> or <strong>Plant Area Index</strong>. Choose the new point cloud and the existing-height HAG option. Set the XY grid and vertical bin sizes in metres.</li>
+<li>If the source lacks <code>HeightAboveGround</code>, open <strong>Add Height Above Ground</strong>, choose the point cloud layer, and select Delaunay or a DTM. Save a new LAS/LAZ file and enable QGIS's option to load the result. A QGIS height-above-ground tool is also suitable if it saves this exact point dimension.</li>
+<li>Open a forest metric such as <strong>Canopy Height Model</strong> or <strong>Plant Area Index</strong>. Choose the prepared point cloud. The tool reads <code>HeightAboveGround</code> automatically. Set the XY grid and, where applicable, vertical bin sizes in metres.</li>
 <li>Save the GeoTIFF and load it into QGIS. Use normal raster symbology, statistics, layouts, and downstream Processing tools.</li>
 </ol>
-<p>Metric tools can calculate HAG during a run. Use the separate HAG tool to keep the point dimension for inspection and reuse. Normalizing height adds <code>HeightAboveGround</code>; the source elevation <code>Z</code> remains elevation.</p>
+<p>All point-cloud metrics, including EPT tiles, require a saved <code>HeightAboveGround</code> dimension before processing. They do not calculate heights during a metric run. Changing <code>Z</code> to normalized heights alone is insufficient; the exact <code>HeightAboveGround</code> dimension must exist. The standalone PyForestScan HAG tool adds this dimension while preserving the original elevation <code>Z</code>.</p>
+<p class="note">Upgrading older models or scripts: replace inline HAG calculation with a separate <strong>Add Height Above Ground</strong> step and connect its output to the metric input. Since 0.4.0, legacy <code>HAG_METHOD</code>/<code>DTM</code> arguments no longer calculate heights inside any metric, including the hidden combined algorithm. Rumple from a CHM continues to use a height raster.</p>
 </section>
 <section id="inputs">
 <h2>Shared inputs, coordinates, and cropping</h2>
@@ -83,8 +84,6 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <tr><td>Missing source CRS<br><code>INPUT_CRS</code></td><td>Only needed if the layer/data metadata has no CRS. This assigns a CRS; it does not transform coordinates. Conflicting known CRS information must be corrected in the source. The project CRS is never silently substituted.</td></tr>
 <tr><td>Extent<br><code>BOUNDS</code></td><td>Restrict the processing area explicitly. QGIS transforms an extent with a known CRS into the point-cloud CRS. An extent without a CRS must already be in source coordinates.</td></tr>
 <tr><td>Crop polygon<br><code>POLYGON</code></td><td>Choose a polygon layer or feature source. Geometries are transformed to the cloud CRS. Use Processing's <strong>Selected features only</strong> option to limit the crop to a selection; otherwise all supplied features are included.</td></tr>
-<tr><td>HAG method<br><code>HAG_METHOD</code></td><td>Metric options: existing <code>HeightAboveGround</code> (0), Delaunay (1), or DTM (2). Existing heights must be present as a point dimension. Selecting Delaunay does not classify ground points.</td></tr>
-<tr><td>DTM<br><code>DTM</code></td><td>A terrain GeoTIFF covering the processing area in the cloud CRS, with compatible metre elevations and vertical reference. Choose it only for DTM-based HAG. Reproject the DTM beforehand if necessary.</td></tr>
 <tr><td>Grid sizes<br><code>VOXEL_XY</code>, <code>VOXEL_Z</code></td><td>Positive XY cell size and vertical height-bin size in metres. Finer bins increase memory use. Height thresholds are metres, not bin indices.</td></tr>
 </tbody>
 </table>
@@ -96,7 +95,8 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <h2>Add Height Above Ground</h2>
 <p><code>pyforestscan:addheightaboveground</code></p>
 <p>Creates a new LAS/LAZ containing a <code>HeightAboveGround</code> dimension. Choose Delaunay to build the terrain surface from points classified as ground (<code>Classification == 2</code>), or DTM to subtract an existing terrain raster. Delaunay requires at least three ground points that are not all on one line, with enough coverage to support the requested area. Explicit cropping also limits the ground points used. DTM requires valid band 1 terrain values at every processed point.</p>
-<p>The new file retains other point dimensions and can be loaded as an ordinary QGIS point cloud. LAS/LAZ/COPC inputs preserve their native XYZ precision; EPT coordinates are serialized at the precision supported by the output LAS encoding. Elevation Z remains elevation and is not replaced by normalized height. It does not edit the original layer in place. Choose a different output path from the source. This tool writes LAS/LAZ, not COPC; QGIS may index the new file when loading it. Use this output in later tools with the existing-height HAG option, or style its HAG attribute in QGIS.</p>
+<p>The <code>HAG_METHOD</code> choices are Delaunay (0) and DTM (1). The ordinary Processing dialog shows the <code>DTM</code> terrain field only when DTM is selected. Use a local terrain raster in the point cloud's CRS, with compatible metre elevations and vertical reference. Selecting Delaunay does not classify ground points.</p>
+<p>The new file retains other point dimensions and can be loaded as an ordinary QGIS point cloud. LAS/LAZ/COPC inputs preserve their native XYZ precision; EPT coordinates are serialized at the precision supported by the output LAS encoding. Elevation Z remains elevation and is not replaced by normalized height. It does not edit the original layer in place. Choose a different output path from the source. This tool writes LAS/LAZ, not COPC; QGIS may index the new file when loading it. Select this output directly in later metric tools, or style its HAG attribute in QGIS.</p>
 </section>
 <section id="canopyheightmodel">
 <h2>Canopy Height Model</h2>
@@ -153,10 +153,11 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <h2>Process EPT Tiles (advanced)</h2>
 <p><code>pyforestscan:processepttiles</code></p>
 <p>Processes a local or remote EPT dataset in tiles for CHM, PAI, FHD, or canopy cover. Select an EPT point-cloud layer with <code>INPUT_LAYER</code>, or enter its <code>ept.json</code> path/URL with <code>EPT_INPUT</code>. Use only one source input. <code>SRS</code> assigns missing CRS information; it does not reproject a known source.</p>
-<p>Choose a processing extent, tile width/height, XY resolution, vertical bin size, and HAG method. Buffered reads give HAG computation surrounding terrain support; points are then restricted to each core tile for metric output. Tile width and height must be whole multiples of the XY cell size, and the output extent is snapped outward to that common grid. Only points inside the study area contribute to metrics; edge cells may extend beyond it. Empty tiles are skipped. Tiled CHM uses maximum HAG through the core voxel-statistic function.</p>
-<p>Tile dimensions must be whole multiples of the XY cell size. Extents snap outward to that grid; points are clipped to the requested extent, but edge pixels may extend beyond it. Cells without retained points are NoData. A DTM must cover the buffered read area as well as the core tile. Existing tile files require explicit <code>OVERWRITE</code>; only files created in this run are returned.</p>
+<p>The EPT source must already contain <code>HeightAboveGround</code>. Choose a processing extent, tile width/height, XY resolution, and metric. The ordinary dialog shows the height-bin field for PAI, FHD, and canopy cover; it shows the minimum height and extinction coefficient only for the metric that uses them. CHM uses maximum HAG through the core voxel-statistic function. Empty tiles are skipped.</p>
+<p>Tile dimensions must be whole multiples of the XY cell size. Extents snap outward to that grid; points are clipped to the requested extent, but edge pixels may extend beyond it. Cells without retained points are NoData. Existing tile files require explicit <code>OVERWRITE</code>; only files created in this run are returned.</p>
 <p>The tool writes a folder of GeoTIFF tiles and returns a list of raster outputs. Enable <code>LOAD_OUTPUTS</code> if you want every tile loaded; this is off by default to avoid filling the Layers panel. Use QGIS raster tools to build a virtual raster or mosaic. No automatic resampling or mosaic is performed.</p>
-<p>Optional outlier cleaning requires the isolated engine and affects the points contributing to metrics. Existing tile files cause an error unless <code>OVERWRITE</code> is enabled. Cancellation is checked between stages and during engine jobs. Completed tiles remain on disk after cancellation; incomplete writes are not published. A forced stop can leave a hidden staging file in the output directory. Start with a small extent to confirm resolution, terrain coverage, memory use, and temporary disk space.</p>
+<p>Optional outlier cleaning requires the isolated engine and affects the points contributing to metrics. Its buffer field appears only when cleaning is enabled: neighboring points supply context for statistical filtering, then only core-tile points contribute to metrics. Without cleaning, no buffer is used. Batch and modeler interfaces keep their parameter lists available for per-row values and model connections.</p>
+<p>Cancellation is checked between stages and during engine jobs. Completed tiles remain on disk after cancellation; incomplete writes are not published. A forced stop can leave a hidden staging file in the output directory. Start with a small extent to confirm resolution, memory use, and temporary disk space.</p>
 </section>
 <section id="checkdependencies">
 <h2>Check PyForestScan Dependencies</h2>
@@ -182,7 +183,7 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <tr><td>Download, checksum, or setup self-test failed</td><td>Check network/proxy access and free disk space, then retry Install/Repair in setup. Failed downloads are not activated, and a previous working engine is preserved. Do not bypass certificate or checksum errors.</td></tr>
 <tr><td>Missing/conflicting CRS or non-metre coordinates</td><td>Inspect the source metadata. Assign a CRS only if it is missing and you know what the coordinates represent. Reproject or convert the source before analysis when required.</td></tr>
 <tr><td>No ground points for Delaunay</td><td>Classify ground using appropriate preprocessing, or supply a suitable DTM. Do not relabel vegetation as ground to bypass the check.</td></tr>
-<tr><td>Missing HeightAboveGround</td><td>Run Add Height Above Ground, or choose Delaunay/DTM within the metric tool.</td></tr>
+<tr><td>Missing HeightAboveGround</td><td>Run PyForestScan Add Height Above Ground or a QGIS tool that saves the exact <code>HeightAboveGround</code> dimension, then select that output point cloud. Normalized Z alone is insufficient. For EPT tiles, the EPT source itself must contain this dimension.</td></tr>
 <tr><td>Empty crop or unexpected coverage</td><td>Check the explicit extent/polygon and its CRS. Confirm the selected-feature setting. Canvas appearance does not determine the crop.</td></tr>
 <tr><td>Slow processing or high memory use</td><td>Try a smaller extent or coarser grid. For EPT, choose smaller tiles. Allow temporary disk space for uncompressed LAS when using native processing.</td></tr>
 <tr><td>No valid rumple result</td><td>Check that the CHM contains complete finite 2×2 patches and sufficient coverage after any height threshold.</td></tr>

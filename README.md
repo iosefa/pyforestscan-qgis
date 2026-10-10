@@ -6,7 +6,7 @@ plant area, foliage height diversity, and other forest structure metrics. The
 plugin uses ordinary Processing dialogs, batch processing, and models; it has no
 separate control panel.
 
-**0.3.3 is an experimental internal release.** It targets QGIS **3.40–3.x and
+**0.4.0 is an experimental internal release.** It targets QGIS **3.40–3.x and
 4.x** with bundled **PyForestScan 0.4.1**. QGIS's own point-cloud tools and
 scientific libraries are used first, with an optional private engine for
 installations that need it. See [tests/README.md](tests/README.md) for verification.
@@ -93,20 +93,37 @@ also explains installation and troubleshooting.
 2. Run **Add Height Above Ground** and select that point cloud layer. Choose
    **Delaunay** when it contains ground points classified as `2`, or choose
    **DTM** and supply a terrain GeoTIFF covering the cloud in the same CRS and
-   vertical reference.
+   vertical reference. The terrain field appears only for the DTM method.
+   Skip this step if the source already contains `HeightAboveGround`. A QGIS
+   height-above-ground tool is also suitable if its saved output contains that
+   exact dimension; replacing Z with normalized heights alone is insufficient.
 3. Choose a new `.las` or `.laz` output and enable QGIS's option to load the
    result. The output adds `HeightAboveGround` and retains other point
    dimensions. LAS/LAZ/COPC inputs keep their native XYZ precision; EPT
    coordinates are serialized at the precision supported by the output LAS
    encoding. Elevation Z remains elevation, and the source is not edited.
 4. Run **Canopy Height Model**, **Plant Area Index**, or another forest metric
-   using the new layer. Choose the existing-height HAG option, set the XY cell
-   size and vertical bin size in metres, and save the result as a GeoTIFF.
+   using the new layer. The tool reads `HeightAboveGround` automatically. Set
+   the XY cell size and, where applicable, vertical bin size in metres, and
+   save the result as a GeoTIFF.
 5. Style the result in QGIS. For PAD, select a height band in raster symbology;
    bands run from the lowest height interval upward.
 
-Metric tools can also calculate HAG during a run. Use the separate HAG tool when
-you want to keep a normalized-height point cloud for inspection or reuse.
+Every point-cloud metric, including **Process EPT Tiles**, requires a saved
+`HeightAboveGround` dimension before it starts. Metric dialogs have no HAG
+method or terrain inputs. A missing dimension produces an error explaining
+how to prepare the source. Rumple from a CHM continues to accept a height raster.
+
+When upgrading older models or scripts that calculated HAG inside a metric
+step, add a separate **Add Height Above Ground** step and connect its output
+to the metric input. Legacy `HAG_METHOD`/`DTM` arguments no longer calculate
+heights inside metrics, including the hidden combined algorithm.
+
+In the ordinary **Process EPT Tiles** dialog, metric-specific settings appear
+only for the selected metric. The buffer setting appears only when outlier
+cleaning is enabled; it supplies neighboring points for that cleaning. Modeler
+and batch interfaces retain their parameter lists so values can be supplied
+by other steps or separately for each row.
 
 Delaunay needs enough suitably distributed classified ground points for a terrain
 surface (at least three non-collinear ground points); selecting the method does

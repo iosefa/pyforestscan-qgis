@@ -13,6 +13,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from qgis_test_support import qgis_application
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from qgis.core import (
     Qgis,
@@ -61,6 +63,14 @@ ALGORITHMS = {
     "voxelstatistics",
     "rumpleindex",
 }
+POINT_CLOUD_METRICS = (
+    "canopyheightmodel",
+    "plantareadensity",
+    "plantareaindex",
+    "foliageheightdiversity",
+    "canopycover",
+    "voxelstatistics",
+)
 FULL_RUNTIME = os.environ.get("PYFORESTSCAN_TEST_RUNTIME") == "1"
 runtime = unittest.skipUnless(
     FULL_RUNTIME, "Set PYFORESTSCAN_TEST_RUNTIME=1 for full integration"
@@ -70,16 +80,12 @@ runtime = unittest.skipUnless(
 class QgisRuntimeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.profile = tempfile.TemporaryDirectory(prefix="pyforestscan-qgis-profile-")
-        cls.app = QgsApplication([], False, cls.profile.name)
-        cls.app.initQgis()
+        cls.app = qgis_application()
         print(f"Testing QGIS {Qgis.QGIS_VERSION}, Qt {QT_VERSION_STR}", flush=True)
 
     @classmethod
     def tearDownClass(cls):
-        cls.app.exitQgis()
         cls.app = None
-        cls.profile.cleanup()
 
     def setUp(self):
         self.plugin = plugin_module.classFactory(None)
@@ -183,6 +189,21 @@ class QgisRuntimeTests(unittest.TestCase):
             point_cloud_reader("https://example.com/forest.copc.laz?token=x"),
             "readers.copc",
         )
+
+    def test_forest_metric_forms_require_prepared_heights(self):
+        for name in (
+            *POINT_CLOUD_METRICS,
+            "calculatelidarmetrics",
+            "processepttiles",
+            "rumpleindex",
+        ):
+            with self.subTest(algorithm=name):
+                algorithm = self.algorithm(name)
+                self.assertIsNone(algorithm.parameterDefinition("HAG_METHOD"))
+                self.assertIsNone(algorithm.parameterDefinition("DTM"))
+        algorithm = self.algorithm("addheightaboveground")
+        self.assertIsNotNone(algorithm.parameterDefinition("HAG_METHOD"))
+        self.assertIsNotNone(algorithm.parameterDefinition("DTM"))
 
     def test_dependency_errors_are_reported(self):
         results = [
@@ -750,14 +771,116 @@ pdal.Pipeline(sys.argv[1]).execute()
         )
 
     @runtime
-    def test_missing_height_geographic_crs_and_transformed_extent(self):
+    def test_all_point_cloud_metrics_reject_missing_hag_with_actionable_guidance(self):
+        source, points = self.create_point_cloud()
+        layer = self.load_cloud(source)
+        cases = [
+            (
+                name,
+                {
+                    "INPUT_LAYER": layer,
+                    "OUTPUT": str(self.root / f"missing-{name}.tif"),
+                },
+            )
+            for name in POINT_CLOUD_METRICS
+        ]
+        cases.extend(
+            [
+                (
+                    "calculatelidarmetrics",
+                    {
+                        "INPUT": str(source),
+                        # The retained legacy density output follows the same
+                        # prepared-point-cloud contract as the focused tools.
+                        "METRICS": [5],
+                        "OUTPUT_FOLDER": str(self.root / "missing-combined"),
+                    },
+                ),
+                (
+                    "processepttiles",
+                    {
+                        "EPT_INPUT": str(self.create_ept(points)),
+                        "OUTPUT_FOLDER": str(self.root / "missing-tiles"),
+                    },
+                ),
+            ]
+        )
+        for name, parameters in cases:
+            for legacy_method in (None, 1, 2):
+                with self.subTest(algorithm=name, legacy_method=legacy_method):
+                    supplied = dict(parameters)
+                    if legacy_method is not None:
+                        # Unknown parameters from old scripts/models must never
+                        # restore normalization inside a forest metric job.
+                        supplied.update(HAG_METHOD=legacy_method, DTM="unused.tif")
+                    feedback = QgsProcessingFeedback()
+                    result, ok = self.algorithm(name).run(
+                        supplied, self.context, feedback
+                    )
+                    self.assertFalse(ok)
+                    self.assertEqual(result, {})
+                    for text in (
+                        "HeightAboveGround",
+                        "Add Height Above Ground",
+                        "QGIS",
+                        "saved output",
+                    ):
+                        self.assertIn(text, feedback.textLog())
+        self.assertFalse(list(self.root.glob("missing-*")))
+
+    @runtime
+    def test_normalized_z_and_similar_dimension_names_do_not_replace_hag(self):
+        import numpy as np
+        from pyforestscan_qgis.vendor import laspy
 
         source, _ = self.create_point_cloud()
+        cloud = laspy.read(source)
+        cloud.z = np.asarray(cloud.z) - 100
+        # Catch substring checks against metadata dimension lists: this extra
+        # dimension must not satisfy the exact HeightAboveGround contract.
+        cloud.add_extra_dim(
+            laspy.ExtraBytesParams(name="HeightAboveGroundExtra", type="f8")
+        )
+        cloud.HeightAboveGroundExtra = np.asarray(cloud.z)
+        cloud.write(source)
+        output = self.root / "normalized-z-only.tif"
         self.run_algorithm(
             "canopyheightmodel",
-            {"INPUT": str(source), "OUTPUT": str(self.root / "missing.tif")},
-            error="HeightAboveGround",
+            {"INPUT": str(source), "OUTPUT": str(output)},
+            error="Changing Z alone is not sufficient",
         )
+        self.assertFalse(output.exists())
+
+    @runtime
+    def test_metrics_read_existing_hag_without_recalculating_from_ground(self):
+        import numpy as np
+        from pyforestscan_qgis.vendor import laspy
+
+        source, _ = self.create_point_cloud(normalized=True)
+        cloud = laspy.read(source)
+        cloud.HeightAboveGround = np.where(
+            np.asarray(cloud.classification) == 2, 0.0, 7.0
+        )
+        cloud.write(source)
+        before = hashlib.sha256(source.read_bytes()).digest()
+        for legacy_method in (None, 1, 2):
+            with self.subTest(legacy_method=legacy_method):
+                parameters = {
+                    "INPUT_LAYER": self.load_cloud(source),
+                    "OUTPUT": str(self.root / f"existing-hag-{legacy_method}.tif"),
+                }
+                if legacy_method is not None:
+                    parameters.update(HAG_METHOD=legacy_method, DTM="unused.tif")
+                result = self.run_algorithm("canopyheightmodel", parameters)
+                values = self.raster_values(result["OUTPUT"])
+                # Z remains 104 over 100 m classified ground: recalculating HAG
+                # would incorrectly produce 4 instead of the stored height 7.
+                np.testing.assert_allclose(values[np.isfinite(values)], 7.0)
+                self.assertEqual(hashlib.sha256(source.read_bytes()).digest(), before)
+
+    @runtime
+    def test_geographic_crs_and_transformed_extent(self):
+        source, _ = self.create_point_cloud()
         geographic = self.root / "geographic.las"
         self.native_algorithm(
             "pdal:reproject",
@@ -980,23 +1103,47 @@ pdal.Pipeline(sys.argv[1]).execute()
             ],
         )
         source = self.create_ept(points)
-        result = self.run_algorithm(
-            "processepttiles",
-            {
-                "EPT_INPUT": str(source),
-                "BOUNDS": "500000,500003,4100000,4100001 [EPSG:32610]",
-                "TILE_WIDTH": 3,
-                "TILE_HEIGHT": 1,
-                "BUFFER_FRACTION": 0,
-                "METRIC": 0,
-                "OUTPUT_FOLDER": str(self.root / "edge_cells"),
-            },
-        )
-        paths = result["OUTPUT_FILES"].splitlines()
-        self.assertEqual(len(paths), 1)
-        with rasterio.open(paths[0]) as raster:
-            self.assertEqual(raster.shape, (1, 3))
-            np.testing.assert_allclose(raster.read(1), [[np.nan, 5, 9]], equal_nan=True)
+        baseline = None
+        for label, inactive_values in (
+            ("default", {}),
+            (
+                "hidden",
+                {
+                    "VOXEL_Z": 0.000001,
+                    "MIN_HEIGHT": 9999,
+                    "FHD_MIN_HEIGHT": 9999,
+                    "COVER_MIN_HEIGHT": 9999,
+                    "COVER_K": 9999,
+                },
+            ),
+        ):
+            with self.subTest(inactive_fields=label):
+                # A user may set tiny height bins for another metric, then switch
+                # to CHM. Those now-hidden fields must not trigger a huge height
+                # grid allocation or change its maximum-height result.
+                result = self.run_algorithm(
+                    "processepttiles",
+                    {
+                        "EPT_INPUT": str(source),
+                        "BOUNDS": "500000,500003,4100000,4100001 [EPSG:32610]",
+                        "TILE_WIDTH": 3,
+                        "TILE_HEIGHT": 1,
+                        "BUFFER_FRACTION": 0,
+                        "METRIC": 0,
+                        "OUTPUT_FOLDER": str(self.root / f"edge_cells_{label}"),
+                        **inactive_values,
+                    },
+                )
+                paths = result["OUTPUT_FILES"].splitlines()
+                self.assertEqual(len(paths), 1)
+                with rasterio.open(paths[0]) as raster:
+                    self.assertEqual(raster.shape, (1, 3))
+                    values = raster.read(1)
+                    np.testing.assert_allclose(values, [[np.nan, 5, 9]], equal_nan=True)
+                    if baseline is None:
+                        baseline = values
+                    else:
+                        np.testing.assert_array_equal(values, baseline)
 
     @runtime
     def test_ept_fractional_tiles_have_no_zero_width_edge(self):

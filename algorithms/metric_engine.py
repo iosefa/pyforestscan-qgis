@@ -17,6 +17,12 @@ import tempfile
 MAX_VOXELS = 5_000_000
 MAX_RASTER_CELLS = 5_000_000
 MAX_RASTER_BANDS = 65_535
+MISSING_HAG_MESSAGE = (
+    "The point cloud is missing the HeightAboveGround dimension. "
+    "Run PyForestScan Add Height Above Ground or a QGIS height-above-ground tool "
+    "that writes this dimension, then select the saved output point cloud. "
+    "Changing Z alone is not sufficient."
+)
 METRIC_NAMES = (
     "CHM",
     "PAD",
@@ -147,6 +153,8 @@ def compute_metrics(
     cover_min_height = _number(cover_min_height, "Minimum canopy cover height")
     cover_k = _number(cover_k, "Canopy cover extinction coefficient")
     fields = set(getattr(getattr(points, "dtype", None), "names", None) or ())
+    if "HeightAboveGround" not in fields:
+        raise ValueError(MISSING_HAG_MESSAGE)
     required = {"X", "Y", "HeightAboveGround"}
     missing = required.difference(fields)
     if missing:

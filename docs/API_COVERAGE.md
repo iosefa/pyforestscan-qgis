@@ -39,13 +39,17 @@ tool. The focused forest tools are the interface for new analyses.
 | `generate_dtm` | QGIS/Python | Terrain generation is outside the forest-metric tool set. Prepare a suitable terrain raster with QGIS/PDAL, or call the upstream function in Python. |
 | `calculate_canopy_cover` | Tool: Canopy Cover; combined and tiled metrics | PAD-based Beer–Lambert cover; default extinction coefficient 0.5. Replaces the old plugin's return-fraction calculation. |
 
+All point-cloud metric tools require a saved `HeightAboveGround` dimension and
+read it automatically. Since plugin 0.4.0 they do not calculate heights inside
+a metric run. Prepare heights in a separate QGIS/PyForestScan step first.
+
 These ten functions are also exported by `pyforestscan.__init__`.
 
 ## Point-cloud filters (`pyforestscan.filters`)
 
 | Public function | Availability in the plugin | Notes |
 | --- | --- | --- |
-| `add_height_above_ground` | Tool: Add Height Above Ground; internal metric preparation | Delaunay terrain from ground class 2, or a DTM. Writes a new LAS/LAZ for the standalone tool. |
+| `add_height_above_ground` | Tool: Add Height Above Ground | Delaunay terrain from ground class 2, or a DTM. Writes a new LAS/LAZ with a persistent dimension for later metrics. |
 | `filter_hag` | QGIS/Python | Use a QGIS point-cloud expression/filter for general height filtering. Metric height thresholds control the individual calculation, not a persistent filtered-cloud output. |
 | `filter_ground` | QGIS/Python | General classification filtering is left to QGIS/PDAL. |
 | `filter_select_ground` | QGIS/Python | Select class 2 with a point-cloud filter when preparing a terrain workflow. |

@@ -118,15 +118,12 @@ def ensure_backend(kind, parameters, context, algorithm, feedback):
     from qgis.core import QgsProcessingException, QgsSettings
     from ..runtime.manager import status
 
-    method = (
-        algorithm.parameterAsEnum(parameters, "HAG_METHOD", context)
-        if kind != "rumple"
-        else 0
-    )
     hag = (
-        ["delaunay", "dtm"][method]
+        ["delaunay", "dtm"][
+            algorithm.parameterAsEnum(parameters, "HAG_METHOD", context)
+        ]
         if kind == "hag"
-        else ["none", "delaunay", "dtm"][method]
+        else "none"
     )
     outliers = kind == "tiles" and algorithm.parameterAsBool(
         parameters, "REMOVE_OUTLIERS", context

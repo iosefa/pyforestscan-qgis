@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 — prepare heights before forest metrics
+
+- Require an existing, exactly named `HeightAboveGround` dimension for all
+  point-cloud metrics, including EPT tiles and the hidden combined algorithm.
+  Read it automatically; remove HAG-method and terrain fields from metric dialogs.
+- Fail early with instructions to run PyForestScan **Add Height Above Ground**
+  or a QGIS tool that writes this dimension, then select the saved output.
+  Normalized Z alone is insufficient. Checks apply to native and isolated processing.
+- Show the standalone HAG tool's terrain field only for the DTM method. In
+  the ordinary EPT dialog, show only settings relevant to the selected metric
+  and show the buffer only for outlier cleaning. Batch/modeler parameter lists
+  stay available for per-row values and model connections.
+- Older models/scripts that requested inline HAG must add a separate height
+  preparation step. Their metric IDs remain registered, but legacy HAG/DTM
+  arguments no longer synthesize heights. Existing engines need no reinstall.
+
 ## 0.3.3 — visible dependency diagnostics
 
 - Fix **Check PyForestScan Dependencies** appearing to do nothing: it now opens
