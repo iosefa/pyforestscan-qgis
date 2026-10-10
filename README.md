@@ -6,7 +6,7 @@ plant area, foliage height diversity, and other forest structure metrics. The
 plugin uses ordinary Processing dialogs, batch processing, and models; it has no
 separate control panel.
 
-**0.4.1 is an experimental internal release.** It targets QGIS **3.40–3.x and
+**0.4.2 is an experimental internal release.** It targets QGIS **3.40–3.x and
 4.x** with bundled **PyForestScan 0.4.1**. QGIS's own point-cloud tools and
 scientific libraries are used first, with an optional private engine for
 installations that need it. See [tests/README.md](tests/README.md) for verification.
@@ -27,12 +27,6 @@ has been tested. QGIS 4.0 itself has not been runtime-tested.
 4. If a tool reports that it needs the optional engine, open **Plugins →
    PyForestScan → Set up PyForestScan**, then click **Install engine**. Once
    validation finishes, rerun the tool. No terminal commands are needed.
-
-If Windows engine setup failed in 0.3.0 with `[WinError 3]` under
-`mamba\pkgs\file\...`, install the current ZIP, restart QGIS, and retry **Install
-engine**. This release fixes the repeated cache path and Windows cleanup of
-long filenames; verified downloads are reused. An already working engine can
-continue to be used.
 
 The ZIP includes the complete pure-Python source of released PyForestScan 0.4.1
 and laspy 2.7.0, their licenses, and offline help. Native processing uses QGIS's

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2 — installation help cleanup
+
+- Remove the obsolete Windows 0.3.0 setup notice from installation instructions
+  and bundled help.
+
 ## 0.4.1 — explain the canopy-cover coefficient
 
 - Explain the extinction coefficient beside the canopy-cover formula in the
