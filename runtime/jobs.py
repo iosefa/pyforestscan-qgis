@@ -20,6 +20,7 @@ from ..algorithms.metric_engine import (
     compute_metrics,
     write_metric_raster,
 )
+from ..algorithms.raster_validation import validate_elevation_band
 
 
 READERS = {"readers.las", "readers.copc", "readers.ept"}
@@ -142,9 +143,7 @@ def _terrain_valid(points, path, cloud_crs):
         if inverse is None:
             raise ValueError("The terrain raster georeferencing cannot be inverted.")
         band = dataset.GetRasterBand(1)
-        unit = (band.GetUnitType() or "").strip().lower()
-        if unit and unit not in ("m", "metre", "meter", "metres", "meters"):
-            raise ValueError("Terrain raster band 1 elevations must be in metres.")
+        validate_elevation_band(band, "Terrain raster band 1", "terrain")
         mask = band.GetMaskBand()
         nodata = band.GetNoDataValue()
         # Fixed small windows prevent striped rasters from requesting huge buffers.
@@ -406,6 +405,7 @@ def rumple(payload, feedback):
         if index < 1 or index > dataset.RasterCount:
             raise ValueError("Choose an existing raster band.")
         band = dataset.GetRasterBand(index)
+        validate_elevation_band(band, "Canopy height band", "canopy height")
         values = band.ReadAsArray().astype(float)
         values[band.GetMaskBand().ReadAsArray() == 0] = np.nan
         nodata = band.GetNoDataValue()

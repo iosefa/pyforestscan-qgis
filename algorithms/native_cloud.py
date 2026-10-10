@@ -264,6 +264,7 @@ def sample_terrain(path, x, y, feedback=None):
     """Sample GDAL band 1 at the containing pixel, validating coverage and NoData."""
     import numpy as np
     from osgeo import gdal
+    from .raster_validation import validate_elevation_band
 
     dataset = gdal.OpenEx(path, gdal.OF_RASTER | gdal.OF_READONLY)
     if dataset is None or dataset.RasterCount < 1:
@@ -292,6 +293,7 @@ def sample_terrain(path, x, y, feedback=None):
                 "The terrain raster must cover every processed point with valid band 1 elevations."
             )
         band = dataset.GetRasterBand(1)
+        validate_elevation_band(band, "Terrain raster band 1", "terrain")
         nodata = band.GetNoDataValue()
         mask = None if band.GetMaskFlags() & gdal.GMF_ALL_VALID else band.GetMaskBand()
         block_width, block_height = band.GetBlockSize()

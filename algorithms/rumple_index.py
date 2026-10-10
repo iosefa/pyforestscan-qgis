@@ -126,6 +126,7 @@ class RumpleIndexAlgorithm(QgsProcessingAlgorithm):
         import numpy as np
         from osgeo import gdal, osr
         from ..vendor.pyforestscan.calculate import calculate_rumple
+        from .raster_validation import validate_elevation_band
 
         raster = None
         try:
@@ -162,6 +163,7 @@ class RumpleIndexAlgorithm(QgsProcessingAlgorithm):
             if not 1 <= band_number <= raster.RasterCount:
                 raise ValueError("Choose an existing height band.")
             band = raster.GetRasterBand(band_number)
+            validate_elevation_band(band, "Canopy height band", "canopy height")
             values, mask = band.ReadAsArray(), band.GetMaskBand().ReadAsArray()
             if values is None or mask is None:
                 raise ValueError("Could not read the canopy height band.")

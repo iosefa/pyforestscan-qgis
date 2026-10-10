@@ -222,12 +222,14 @@ def _dtm_path(algorithm, parameters, context, crs):
         from .common import require_metric_crs
 
         require_metric_crs(stored_crs)
-        unit = raster.GetRasterBand(1).GetUnitType().strip().lower()
-        if unit and unit not in ("m", "metre", "meter", "metres", "meters"):
-            raise QgsProcessingException(
-                f"The terrain raster band 1 declares elevation units '{unit}'. "
-                "Convert terrain elevations to metres before calculating height above ground."
+        from .raster_validation import validate_elevation_band
+
+        try:
+            validate_elevation_band(
+                raster.GetRasterBand(1), "Terrain raster band 1", "terrain"
             )
+        except ValueError as exc:
+            raise QgsProcessingException(str(exc)) from exc
     finally:
         raster = None
     return path

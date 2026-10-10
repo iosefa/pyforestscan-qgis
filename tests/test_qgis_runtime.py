@@ -715,6 +715,52 @@ pdal.Pipeline(sys.argv[1]).execute()
         self.assertEqual(dtm.read_bytes(), before)
 
     @runtime
+    def test_scaled_elevation_rasters_and_feet_preserve_existing_outputs(self):
+        from osgeo import gdal
+        from pyforestscan_qgis.algorithms.native_cloud import sample_terrain
+
+        source, _ = self.create_point_cloud()
+        hag_output = self.root / "existing-hag.las"
+        rumple_output = self.root / "existing-rumple.csv"
+        previous = b"An existing output must survive elevation validation failure."
+        hag_output.write_bytes(previous)
+        rumple_output.write_bytes(previous)
+        for name, scale, offset, unit, error in (
+            ("scaled", 0.1, 0, "m", "scale or offset"),
+            ("offset", 1, 100, "m", "scale or offset"),
+            ("feet", 1, 0, "ft", "elevations to metres"),
+        ):
+            with self.subTest(encoding=name):
+                terrain = self.create_dtm(f"{name}.tif", value=1000)
+                dataset = gdal.Open(str(terrain), gdal.GA_Update)
+                band = dataset.GetRasterBand(1)
+                band.SetScale(scale)
+                band.SetOffset(offset)
+                band.SetUnitType(unit)
+                band = dataset = None
+                self.run_algorithm(
+                    "addheightaboveground",
+                    {
+                        "INPUT": str(source),
+                        "HAG_METHOD": 1,
+                        "DTM": str(terrain),
+                        "OUTPUT": str(hag_output),
+                    },
+                    error=error,
+                )
+                # Also guard direct native sampling, independently of the form.
+                with self.assertRaisesRegex(ValueError, error):
+                    sample_terrain(str(terrain), [500000.5], [4100000.5])
+                self.run_algorithm(
+                    "rumpleindex",
+                    {"INPUT": str(terrain), "OUTPUT": str(rumple_output)},
+                    error=error,
+                )
+                self.assertEqual(hag_output.read_bytes(), previous)
+                self.assertEqual(rumple_output.read_bytes(), previous)
+        self.assertFalse(list(self.root.glob(".pyforestscan-*")))
+
+    @runtime
     def test_input_errors_and_source_protection(self):
         import numpy as np
 

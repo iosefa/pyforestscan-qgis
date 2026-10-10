@@ -370,6 +370,51 @@ class WorkerScientificTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "metres"):
             jobs._crs("EPSG:2263", metres=True)
 
+    def test_scaled_elevation_rasters_and_feet_preserve_existing_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prepared = self.fixture(directory)
+            terrain = os.path.join(directory, "encoded-elevations.tif")
+            hag_output = Path(directory) / "existing-hag.las"
+            rumple_output = Path(directory) / "existing-rumple.csv"
+            previous = b"An existing output must survive elevation validation failure."
+            hag_output.write_bytes(previous)
+            rumple_output.write_bytes(previous)
+            prepared.update(
+                hag_method="dtm",
+                dtm_path=terrain,
+                filters=[{"type": "filters.hag_dem", "raster": terrain}],
+            )
+            for scale, offset, unit, error in (
+                (0.1, 0, "m", "scale or offset"),
+                (1, 100, "m", "scale or offset"),
+                (1, 0, "ft", "elevations to metres"),
+            ):
+                with self.subTest(scale=scale, offset=offset, unit=unit):
+                    raster = gdal.GetDriverByName("GTiff").Create(
+                        terrain, 3, 3, 1, gdal.GDT_Int16
+                    )
+                    raster.SetGeoTransform((500000, 1, 0, 4100003, 0, -1))
+                    raster.SetProjection(prepared["crs_wkt"])
+                    band = raster.GetRasterBand(1)
+                    band.WriteArray(np.full((3, 3), 1000, dtype="int16"))
+                    band.SetScale(scale)
+                    band.SetOffset(offset)
+                    band.SetUnitType(unit)
+                    band = raster = None
+                    with self.assertRaisesRegex(ValueError, error):
+                        jobs.hag(
+                            {"prepared": prepared, "output": str(hag_output)},
+                            QuietFeedback(),
+                        )
+                    with self.assertRaisesRegex(ValueError, error):
+                        jobs.rumple(
+                            {"source": terrain, "output": str(rumple_output)},
+                            QuietFeedback(),
+                        )
+                    self.assertEqual(hag_output.read_bytes(), previous)
+                    self.assertEqual(rumple_output.read_bytes(), previous)
+            self.assertFalse(list(Path(directory).glob(".pyforestscan-*")))
+
     def test_declared_terrain_vertical_units_require_metres(self):
         with tempfile.TemporaryDirectory() as directory:
             terrain = os.path.join(directory, "vertical_units.tif")
