@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import ntpath
 import os
 from pathlib import Path
 import sys
@@ -28,8 +29,8 @@ from pyforestscan_test_runtime import client, manager  # noqa: E402 -- import th
 
 class EngineManagerTests(unittest.TestCase):
     def setUp(self):
-        self.directory = tempfile.TemporaryDirectory(prefix="pyforestscan-manager-")
-        self.root = Path(self.directory.name) / "engines"
+        self.directory = tempfile.TemporaryDirectory(prefix="pfs-")
+        self.root = Path(self.directory.name) / "e"
         self.override = patch.dict(
             os.environ, {"PYFORESTSCAN_ENGINE_ROOT": str(self.root)}
         )
@@ -265,8 +266,9 @@ class EngineManagerTests(unittest.TestCase):
             self.assertTrue((prefix / "conda-meta" / "history").is_file())
             self.assertEqual(
                 json.loads(config.read_text())["pkgs_dirs"],
-                [str(prefix.parent / "mamba" / "pkgs")],
+                [str(self.root / "s")],
             )
+            self.assertEqual(command[command.index("--root-prefix") + 1], self.root / "s")
             explicit = Path(command[command.index("--file") + 1]).read_text()
             self.assertEqual(
                 explicit.splitlines(),
@@ -278,8 +280,10 @@ class EngineManagerTests(unittest.TestCase):
             )
             self.assertNotIn("file://", explicit)
             for package in lock["packages"]:
-                archive = prefix.parent / "mamba" / "pkgs" / package["filename"]
+                archive = self.root / "s" / package["filename"]
                 self.assertEqual(archive.read_bytes(), b"test artifact")
+            if isinstance(process_result, Exception):
+                raise process_result
             python = manager._python(prefix)
             python.parent.mkdir(parents=True, exist_ok=True)
             python.write_text("new interpreter")
@@ -317,6 +321,137 @@ class EngineManagerTests(unittest.TestCase):
         self.assertNotEqual(
             json.loads((base / "active.json").read_text())["generation"], previous.name
         )
+        self.assertFalse((self.root / "s").exists())
+
+    def test_failed_installer_cleans_cache_and_preserves_working_engine(self):
+        with self.assertRaisesRegex(client.EngineError, "extraction failed"):
+            self._installation(
+                lambda *a, **k: self.fail("Failed installer must not self-test"),
+                process_result=(1, "extraction failed"),
+            )
+        self.assertFalse((self.root / "s").exists())
+
+    def test_canceled_installer_cleans_cache_and_preserves_working_engine(self):
+        with self.assertRaises(client.EngineCanceled):
+            self._installation(
+                lambda *a, **k: self.fail("Canceled installer must not self-test"),
+                process_result=client.EngineCanceled("canceled"),
+            )
+        self.assertFalse((self.root / "s").exists())
+
+    def test_retry_discards_owned_extracted_cache_from_crashed_installer(self):
+        self.owned()
+        stale = self.root / "s"
+        manager._ensure_owned(stale, "installer")
+        remnant = stale / "incomplete-extraction"
+        remnant.mkdir()
+        (remnant / "corrupted.txt").write_text("partial contents")
+        _, _, result = self._installation(lambda *a, **k: {"ready": True})
+        self.assertTrue(result["installed"])
+        self.assertFalse(stale.exists())
+
+    def test_unrecognized_shallow_cache_is_preserved(self):
+        self.owned()
+        cache = self.root / "s"
+        cache.mkdir()
+        important = cache / "important.txt"
+        important.write_text("preserve")
+        with self.assertRaisesRegex(client.EngineError, "unrecognized installer cache"):
+            self._installation(lambda *a, **k: self.fail("Must not install"))
+        self.assertEqual(important.read_text(), "preserve")
+
+    def test_failed_cache_cleanup_keeps_marker_and_previous_engine(self):
+        remove = manager._remove_tree
+
+        def partial_removal(path):
+            if Path(path) == self.root / "s":
+                (Path(path) / manager.MARKER).unlink()
+                raise PermissionError("cache file is locked")
+            remove(path)
+
+        with patch.object(manager, "_remove_tree", side_effect=partial_removal):
+            with self.assertRaisesRegex(client.EngineError, "cache file is locked"):
+                self._installation(lambda *a, **k: {"ready": True})
+        self.assertTrue(manager._owned(self.root / "s", "installer"))
+        manager._remove_installer_cache(self.root)
+        self.assertFalse((self.root / "s").exists())
+
+    def test_linked_cache_is_never_removed(self):
+        self.owned()
+        outside = Path(self.directory.name) / "outside"
+        manager._ensure_owned(outside, "installer")
+        cache = self.root / "s"
+        try:
+            cache.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest("Symbolic links unavailable")
+        with self.assertRaises(client.EngineError):
+            manager._remove_installer_cache(self.root)
+        self.assertTrue(outside.is_dir())
+
+    def test_windows_path_audit_covers_default_and_short_roots(self):
+        with patch.object(manager, "platform_tag", return_value="win-64"):
+            _, digest = manager._lock_data()
+            bootstrap = manager._bootstrap_data()
+        for root in (
+            r"C:\Users\example\AppData\Local\pyforestscan\engines",
+            r"C:\Users\abcdefghijklmnopqrst\AppData\Local\pyforestscan\engines",
+            r"C:\Users\example\pfs",
+        ):
+            prefix = ntpath.join(root, "0.4.1-1-win-64", "instances", "a" * 32, "env")
+            with self.subTest(root=root):
+                manager._check_windows_paths(root, prefix, digest, bootstrap)
+        with self.assertRaisesRegex(client.EngineError, "too long"):
+            manager._check_windows_paths(root + "x" * 100, prefix, digest, bootstrap)
+        with self.assertRaisesRegex(client.EngineError, "too long"):
+            manager._check_windows_paths(root, prefix + "x" * 100, digest, bootstrap)
+
+    def test_windows_path_audit_is_bound_to_packages_and_installer(self):
+        with patch.object(manager, "platform_tag", return_value="win-64"):
+            _, digest = manager._lock_data()
+            bootstrap = manager._bootstrap_data()
+        for bad_digest, bad_bootstrap in (("0" * 64, bootstrap), (digest, {"sha256": "0" * 64})):
+            with self.subTest(digest=bad_digest, bootstrap=bad_bootstrap):
+                with self.assertRaisesRegex(client.EngineError, "matching Windows"):
+                    manager._check_windows_paths(r"C:\pfs", r"C:\pfs\env", bad_digest, bad_bootstrap)
+
+    def test_windows_path_audit_counts_utf16_characters(self):
+        with patch.object(manager, "platform_tag", return_value="win-64"):
+            _, digest = manager._lock_data()
+            bootstrap = manager._bootstrap_data()
+        root = "C:\\" + "\U0001f333" * 30
+        manager._check_windows_paths(root, root + r"\env", digest, bootstrap)
+        with self.assertRaisesRegex(client.EngineError, "too long"):
+            manager._check_windows_paths(root + "\U0001f333" * 5, root + r"\env", digest, bootstrap)
+
+    def test_overlong_windows_location_fails_before_download_or_creation(self):
+        root = Path(self.directory.name) / ("long-profile-" * 15) / "engine"
+        with (
+            patch.dict(os.environ, {"PYFORESTSCAN_ENGINE_ROOT": str(root)}),
+            patch.object(manager, "platform_tag", return_value="win-64"),
+            patch.object(manager, "_download_verified") as download,
+        ):
+            with self.assertRaisesRegex(client.EngineError, "too long"):
+                manager.install_engine()
+            download.assert_not_called()
+        self.assertFalse(root.exists())
+
+    @unittest.skipUnless(os.name == "nt", "Requires Windows directory junctions")
+    def test_junction_cache_is_never_removed(self):
+        self.owned()
+        outside = Path(self.directory.name) / "outside"
+        manager._ensure_owned(outside, "installer")
+        cache = self.root / "s"
+        subprocess.run(
+            ["cmd.exe", "/c", "mklink", "/J", str(cache), str(outside)],
+            check=True, capture_output=True,
+        )
+        try:
+            with self.assertRaises(client.EngineError):
+                manager._remove_installer_cache(self.root)
+            self.assertTrue(outside.is_dir())
+        finally:
+            os.rmdir(cache)
 
     def test_selftest_not_ready_cannot_activate(self):
         with self.assertRaisesRegex(client.EngineError, "did not pass"):

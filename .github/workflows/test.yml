@@ -16,13 +16,27 @@ permissions:
 jobs:
   windows-installer-guards:
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Exercise the legacy Windows path limit
+        shell: pwsh
+        run: |
+          # Runner-only setting: the plugin must not need users to change this.
+          Set-ItemProperty -Path HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem -Name LongPathsEnabled -Value 0
+          if ((Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem).LongPathsEnabled -ne 0) { throw "Long paths must be disabled for this regression check" }
       - name: Exercise Windows path cleanup and installer rollback
         run: python -m unittest discover -s tests -p test_engine_manager.py -v
+      - name: Install and repair the complete engine in AppData without long-path support
+        shell: pwsh
+        run: |
+          $env:PYFORESTSCAN_ENGINE_ROOT = Join-Path $env:LOCALAPPDATA "pyforestscan\engines"
+          python scripts/check_engine_install.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem).LongPathsEnabled -ne 0) { throw "Installer changed Windows long-path policy" }
 
   qgis:
     runs-on: ubuntu-latest

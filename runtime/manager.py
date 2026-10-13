@@ -16,6 +16,7 @@ import platform
 import re
 import shutil
 import ssl
+import stat
 import tempfile
 import time
 from urllib.parse import urlsplit
@@ -107,6 +108,9 @@ def _owned(path, kind):
     if path.is_symlink() or not path.is_dir() or marker.is_symlink():
         return False
     try:
+        # Windows junctions are reparse points but are not Python symlinks.
+        if getattr(path.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            return False
         record = _json(marker)
         return record == {"owner": OWNER, "kind": kind, "schema": 1}
     except (OSError, ValueError):
@@ -183,6 +187,73 @@ def _seed_package_cache(package_paths, package_cache):
             os.link(source, destination)
         except OSError:
             shutil.copyfile(source, destination)
+
+
+def _installer_cache(root):
+    # Keep this directly below the engine root. Micromamba 2.9 adds the channel,
+    # package name and archive member below this path; nesting it inside a
+    # generation exceeds MAX_PATH on ordinary Windows profiles.
+    return Path(root) / "s"
+
+
+def _remove_installer_cache(root):
+    path = _installer_cache(root)
+    if not path.exists() and not path.is_symlink():
+        return
+    if not _owned(root, "root") or not _owned(path, "installer"):
+        raise EngineError("Refusing to remove an unrecognized installer cache.")
+    try:
+        _remove_tree(path)
+    except OSError:
+        # As with generations, preserve recognition after a partial deletion.
+        try:
+            if path.is_dir() and not path.is_symlink() and not (path / MARKER).exists():
+                _atomic_json(path / MARKER, {"owner": OWNER, "kind": "installer", "schema": 1})
+        except OSError:
+            pass
+        raise
+
+
+def _check_windows_paths(root, prefix, lock_digest, bootstrap):
+    """Check audited archive paths without relying on Windows long-path policy.
+
+    The audit is separate from the scientific package lock, so existing active
+    engines remain valid. A changed lock or installer requires a new audit.
+    """
+    try:
+        audit = _json(HERE / "windows-paths.json")
+        if (
+            audit["schema"] != 1
+            or audit["lock_sha256"] != lock_digest
+            or audit["installer_sha256"] != bootstrap["sha256"]
+        ):
+            raise ValueError("Outdated path audit")
+        for name, base, limit in (
+            ("cache_file", ntpath.join(str(root), "s"), 259),
+            ("cache_directory", ntpath.join(str(root), "s"), 247),
+            ("prefix_file", str(prefix), 259),
+            ("prefix_directory", str(prefix), 247),
+        ):
+            member = audit[name]
+            if not isinstance(member, str) or not member or ntpath.isabs(member):
+                raise ValueError("Invalid audited member")
+            path = ntpath.join(base, member)
+            # Windows limits UTF-16 code units, not Python Unicode code points.
+            length = len(path.encode("utf-16-le")) // 2
+            if length > limit:
+                raise EngineError(
+                    "The engine location is too long for Windows setup "
+                    f"({length} characters; maximum {limit} for this package path). "
+                    "In QGIS Settings > Options > System > Environment, set "
+                    "PYFORESTSCAN_ENGINE_ROOT to a shorter, new folder under your "
+                    "user folder, then restart QGIS and retry. Do not create the "
+                    "folder yourself. No packages have been downloaded or installed."
+                )
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise EngineError(
+            "The plugin is missing a matching Windows package-path audit. "
+            "Reinstall the plugin ZIP."
+        ) from exc
 
 
 @contextmanager
@@ -594,9 +665,18 @@ def install_engine(progress=None, cancel=None):
     lock, digest = _lock_data()
     bootstrap = _bootstrap_data()
     root, base = engine_root(), version_root()
+    generation = uuid.uuid4().hex
+    instance = base / "instances" / generation
+    prefix = instance / "env"
+    if platform_tag() == "win-64":
+        _check_windows_paths(root, prefix, digest, bootstrap)
     _ensure_owned(root, "root")
     with _operation_lock(root):
         _ensure_owned(base, "version")
+        # The root lock serializes this cache across versions. Never reuse an
+        # extracted cache after failure or a crash; verified archives are kept
+        # separately in downloads and are rechecked before every installation.
+        _remove_installer_cache(root)
         cache = base / "downloads"
         instances = base / "instances"
         for folder in (cache, instances):
@@ -643,8 +723,6 @@ def install_engine(progress=None, cancel=None):
         package_paths = [
             (fetch(item, item["filename"]), item) for item in lock["packages"]
         ]
-        generation = uuid.uuid4().hex
-        instance = instances / generation
         _ensure_owned(instance, "generation")
         activated = False
         try:
@@ -658,13 +736,14 @@ def install_engine(progress=None, cancel=None):
                 + "\n",
                 encoding="utf-8",
             )
-            prefix = instance / "env"
             # Micromamba 2.9 incorporates the complete archive URL in extracted
             # cache paths. A local file:// URL repeats the entire user-data path,
             # exceeding Windows MAX_PATH even for short package members. Keep
             # the original HTTPS namespace and preseed verified archives locally
             # so installation can reuse the cache without further downloads.
-            _seed_package_cache(package_paths, instance / "mamba" / "pkgs")
+            installer_cache = _installer_cache(root)
+            _ensure_owned(installer_cache, "installer")
+            _seed_package_cache(package_paths, installer_cache)
             # Installing into a fresh owned conda prefix avoids the create command
             # registering it in the user's global ~/.conda/environments.txt.
             (prefix / "conda-meta").mkdir(parents=True)
@@ -673,8 +752,8 @@ def install_engine(progress=None, cancel=None):
             config.write_text(
                 json.dumps(
                     {
-                        "pkgs_dirs": [str(instance / "mamba" / "pkgs")],
-                        "envs_dirs": [str(instance / "mamba" / "envs")],
+                        "pkgs_dirs": [str(installer_cache)],
+                        "envs_dirs": [str(installer_cache / "envs")],
                     }
                 ),
                 encoding="utf-8",
@@ -698,7 +777,7 @@ def install_engine(progress=None, cancel=None):
                     "--prefix",
                     prefix,
                     "--root-prefix",
-                    instance / "mamba",
+                    installer_cache,
                     "--file",
                     explicit,
                 ],
@@ -728,13 +807,7 @@ def install_engine(progress=None, cancel=None):
                     "The new engine did not pass its scientific self-test; the previous engine is unchanged."
                 )
             report(97, "Cleaning temporary setup files")
-            installer_cache = instance / "mamba"
-            if installer_cache.exists():
-                if installer_cache.is_symlink() or not _owned(instance, "generation"):
-                    raise EngineError(
-                        "Refusing to remove an unrecognized installer cache."
-                    )
-                _remove_tree(installer_cache)
+            _remove_installer_cache(root)
             _check_cancel(cancel)
             _atomic_json(
                 base / "active.json",
@@ -753,16 +826,23 @@ def install_engine(progress=None, cancel=None):
             return status()
         except Exception as original:
             if not activated:
-                try:
-                    _remove_generation(instance, base)
-                except Exception as cleanup:
+                failures = []
+                for cleanup in (
+                    lambda: _remove_installer_cache(root),
+                    lambda: _remove_generation(instance, base),
+                ):
+                    try:
+                        cleanup()
+                    except Exception as error:
+                        failures.append(str(error))
+                if failures:
                     error_type = (
                         EngineCanceled
                         if isinstance(original, EngineCanceled)
                         else EngineError
                     )
                     raise error_type(
-                        f"{original}\nTemporary engine cleanup also failed: {cleanup}. "
+                        f"{original}\nTemporary engine cleanup also failed: {'; '.join(failures)}. "
                         "The previous working engine remains unchanged; setup can be retried."
                     ) from original
             raise
@@ -777,6 +857,11 @@ def remove_engine(progress=None, cancel=None):
         raise EngineError("Refusing to remove an unrecognized engine directory.")
     with _operation_lock(root):
         _check_cancel(cancel)
+        installer_cache = _installer_cache(root)
+        if (installer_cache.exists() or installer_cache.is_symlink()) and not _owned(
+            installer_cache, "installer"
+        ):
+            raise EngineError("Refusing to remove an unrecognized installer cache.")
         instances = base / "instances"
         if instances.is_symlink():
             raise EngineError("Refusing to remove linked engine data.")
@@ -796,6 +881,7 @@ def remove_engine(progress=None, cancel=None):
                 "The engine activation record is a symbolic link; removal was stopped."
             )
         active.unlink(missing_ok=True)
+        _remove_installer_cache(root)
         for index, generation in enumerate(generations):
             _remove_generation(generation, base)
             if progress:

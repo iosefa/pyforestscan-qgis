@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "lock_sha256": "14adb2defaecc88bfd7da429f215c671fca3cd80f909eba65ff867cb01f5428c",
+  "installer_sha256": "a6d804394b2418991c4e29562853eaace2f2ce9d9da661a98e74e02e8dbb44b0",
+  "package_count": 139,
+  "member_count": 23920,
+  "cache_file": "https/conda.anaconda.org/conda-forge/win-64/matplotlib-base-3.11.2-py312hf9659c1_1/Lib/site-packages/mpl_toolkits/axisartist/tests/__pycache__/test_grid_helper_curvelinear.cpython-312.pyc",
+  "cache_directory": "https/conda.anaconda.org/conda-forge/win-64/numpy-2.5.3-py312ha3f287d_0/Lib/site-packages/numpy-2.5.3.dist-info/licenses/numpy/_core/src/common/pythoncapi-compat",
+  "prefix_file": "Lib/site-packages/pandas/tests/window/moments/__pycache__/test_moments_consistency_expanding.cpython-312.pyc",
+  "prefix_directory": "Lib/site-packages/numpy-2.5.3.dist-info/licenses/numpy/_core/src/common/pythoncapi-compat"
+}
