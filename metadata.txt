@@ -2,8 +2,8 @@
 name=PyForestScan
 description=QGIS Processing wrappers for PyForestScan LiDAR forest structure metrics.
 about=Forest structure metrics and persistent HeightAboveGround in the Processing Toolbox. Native point-cloud processing requires QGIS 4.2+, its PDAL Processing provider, NumPy 2.3.1+, SciPy 1.16+ and GDAL. QGIS 3.40/4.0 and installations missing these capabilities need the optional isolated engine, installed through Plugins > PyForestScan > Set up PyForestScan. Engine setup needs internet access and additional disk space; packages support Windows x64, Linux x64 and macOS Intel/Apple Silicon. See bundled help for installation and tested-platform limits.
-version=0.4.3
-changelog=0.4.3: Validate terrain and CHM raster encoding before height/rumple calculations; prepare community release documentation.
+version=0.4.4
+changelog=0.4.4: Fix Windows engine setup with a shallow unpacking cache, audited path limits, and safe cleanup on retry.
 qgisMinimumVersion=3.40
 qgisMaximumVersion=4.99
 author=Nicholas Rogers, Joseph Percival

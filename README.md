@@ -6,7 +6,7 @@ plant area, foliage height diversity, and other forest structure metrics. The
 plugin uses ordinary Processing dialogs, batch processing, and models; it has no
 separate control panel.
 
-**0.4.3 is an experimental release.** It targets QGIS **3.40–3.x and
+**0.4.4 is an experimental release.** It targets QGIS **3.40–3.x and
 4.x** with bundled **PyForestScan 0.4.1**. QGIS's own point-cloud tools and
 scientific libraries are used first, with an optional private engine for
 installations that need it. See [tests/README.md](tests/README.md) for verification.
@@ -15,7 +15,7 @@ has been tested. QGIS 4.0 itself has not been runtime-tested.
 
 ## Install
 
-1. Obtain the release ZIP (`pyforestscan_qgis-0.4.3.zip`), or build it with
+1. Obtain the release ZIP (`pyforestscan_qgis-0.4.4.zip`), or build it with
    `scripts/package_plugin.sh` (output: `dist/pyforestscan_qgis.zip`).
 2. In QGIS, open **Plugins → Manage and Install Plugins → Install from ZIP**,
    select the ZIP, and enable **PyForestScan**.
@@ -24,7 +24,7 @@ has been tested. QGIS 4.0 itself has not been runtime-tested.
    or choose an HTML file to keep. Read the **Log** tab or open the report in
    **Processing → Results Viewer**. An overall **OK** means the selected backend
    supports the primary forest workflows.
-4. If a tool reports that it needs the optional engine, open **Plugins →
+4. If the dependency check fails or a tool needs the optional engine, open **Plugins →
    PyForestScan → Set up PyForestScan**, then click **Install engine**. Once
    validation finishes, rerun the tool. No terminal commands are needed.
 
@@ -45,6 +45,14 @@ replacement passes validation. Removal affects only this plugin's owned engine
 files; verified downloads remain cached for reinstall. Internet access is needed
 for the first installation. An already installed engine can process local data
 offline; remote EPT still needs network access.
+
+On Windows, setup uses a shallow temporary cache and checks the pinned packages'
+path lengths before downloading. Normal AppData locations need no environment
+variable, administrator access, or Windows long-path setting changes. After
+upgrading the plugin, restart QGIS and retry **Install engine**; verified downloads
+are reused and incomplete unpacking caches are rebuilt. Existing
+`PYFORESTSCAN_ENGINE_ROOT` overrides still work. Keep an override in place if an
+engine is already installed there, so the plugin can continue finding it.
 
 Setup shows the platform's download size and required free space. Pinned engine
 packages are provided for **macOS Apple Silicon and Intel, Windows x64, and

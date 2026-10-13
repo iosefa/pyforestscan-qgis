@@ -15,8 +15,10 @@ experimental until the platform checks below support a stable designation.
    homepage, repository and tracker URLs in `metadata.txt` while signed out.
    Push the release's source commits so the public repository matches the ZIP.
 3. Run the checks in [tests/README.md](../tests/README.md). The GitHub Actions
-   **QGIS compatibility** workflow tests Linux QGIS 3.40/4.2 and Windows installer
-   guards. Use **Run workflow → engine_platforms** for real engine installation
+   **QGIS compatibility** workflow tests Linux QGIS 3.40/4.2, Windows installer
+   guards, and a real Windows install/repair/cancellation with long paths disabled
+   on the disposable runner. Reproduce the Windows archive-path audit when
+   updating pinned packages or the installer. Use **Run workflow → engine_platforms** for real engine installation
    and worker checks on Linux, Windows and macOS. Review the actual results;
    a configured workflow is not a passing run. Smoke-test installation,
    dependency reporting, loaded-cloud HAG, and a forest metric on each target

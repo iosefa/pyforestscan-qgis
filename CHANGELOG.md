@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.4 — Windows engine setup
+
+- Fix Windows engine setup failures caused by long extracted-package paths,
+  including Matplotlib and unicodedata2. Unpacking now uses a shallow, owned
+  cache directly under the engine root, outside version/generation directories.
+- Check Windows file and directory path limits before downloading, using an
+  audit of all 139 pinned archives. The audit is tied to the exact scientific
+  lock and installer checksum; it counts Windows UTF-16 path characters.
+- Rebuild interrupted extraction caches on retry while retaining verified
+  downloads. Clean up on failure/cancellation, preserve ownership after a
+  partial cleanup, and reject cache symlinks and Windows junctions.
+- Preserve existing engine locations, package versions and activation records.
+  Repairs activate only after validation; no QGIS Python, administrator, or
+  Windows long-path policy changes are required by the plugin.
+- Add a real Windows installation, repair, cancellation and scientific-worker
+  CI check with long-path support disabled, plus a reproducible archive audit.
+
 ## 0.4.3 — community release preparation
 
 - Reject terrain/CHM rasters with nonidentity scale/offset or incompatible

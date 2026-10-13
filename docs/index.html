@@ -21,7 +21,7 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <body>
 <header>
 <h1>PyForestScan for QGIS</h1>
-<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.4.3, experimental release; QGIS 3.40–3.x and 4.x; bundled PyForestScan 0.4.1.</p>
+<p>Forest structure tools in the <strong>Processing Toolbox</strong>. Plugin 0.4.4, experimental release; QGIS 3.40–3.x and 4.x; bundled PyForestScan 0.4.1.</p>
 <p>Select a saved point cloud already in your project, add height above ground, and create forest metric rasters. Tools use normal Processing dialogs, batch jobs, and models. This help is included in the plugin and works offline.</p>
 <p>Licensed under <a href="../LICENSE">GPL-2.0-or-later</a>. Bundled PyForestScan retains its <a href="../vendor/pyforestscan/LICENSE">MIT license</a>, and laspy retains its <a href="../vendor/laspy/LICENSE.txt">BSD-2-Clause license</a>.</p>
 </header>
@@ -60,6 +60,7 @@ nav ul { columns: 2; padding-left: 1.3rem; }
 <li>When setup reports that the engine is ready, rerun the Processing tool. Leave <strong>Processing backend</strong> on <strong>Automatic</strong> to use QGIS when it has the required capabilities. If QGIS cannot read a particular source, choose <strong>Isolated engine</strong> to retry with the private PDAL reader.</li>
 </ol>
 <p>No terminal commands or administrator installation are required. The engine contains its own Python and scientific libraries under your user data directory. Exact package downloads use HTTPS and SHA256 verification. A real HAG, metric, and raster self-test must pass before activation. QGIS's Python, other environments, and shell settings are not changed. On macOS, setup restores code signatures invalidated by package relocation inside this private environment.</p>
+<p>Windows setup checks package path lengths before downloading and uses a shallow temporary cache. Normal AppData locations need no environment variable or change to Windows long-path settings. After a plugin upgrade, restart QGIS and retry <strong>Install engine</strong>; verified downloads are reused. If you already use <code>PYFORESTSCAN_ENGINE_ROOT</code>, you can keep it, and should keep it when it points to an installed engine.</p>
 <p>Packages are provided for macOS Apple Silicon and Intel, Windows x64, and Linux x64. ARM Windows/Linux engine packages are not provided. Availability of a package manifest is distinct from end-to-end platform validation; consult the test record. The native workflow can still work on platforms without an engine package if its capability checks pass.</p>
 <p>Use <strong>Repair engine</strong> for a broken installation. A replacement is built separately and becomes active only after validation; a failed repair preserves the current working engine. <strong>Remove engine</strong> removes only this plugin's owned engine installations and retains verified downloads for reinstall. Point clouds and projects are unaffected. An installed engine can process local data offline. Network proxies and certificates configured in QGIS are used for setup downloads.</p>
 </section>

@@ -174,7 +174,11 @@ and run the private worker tests against the same staged directory. Unset the
 path variable before returning to source-tree tests.
 
 GitHub Actions is configured to build/test the ZIP with Linux QGIS **3.40 using
-the isolated engine** and **4.2 using native processing**. Its optional manual
+the isolated engine** and **4.2 using native processing**. Every push/PR also
+runs the Windows installer guards and a real install, repair, canceled repair,
+and scientific-worker suite in AppData. That disposable runner disables Windows
+long-path support to exercise the reported failure condition; the plugin itself
+does not change that setting. Its optional manual
 `engine_platforms` input additionally performs real locked-engine installation
 and worker tests on Linux, Windows and macOS runners without installing QGIS.
 The macOS runner tests its detected architecture; this does not cover both Mac
@@ -342,3 +346,58 @@ source revision; this review is not a declaration of repository approval.
 See [the publication guide](../docs/RELEASING.md) for the remaining steps.
 Linux execution, Intel macOS, QGIS 4.0, live remote EPT and production-sized
 workloads have not been verified by the recorded automated review.
+
+## 0.4.4 Windows path regression
+
+The Windows installer now uses `<engine root>/s` as a disposable unpacking
+cache, protected by the existing engine-root operation lock. It retains the
+per-version verified download cache and the existing permanent generation paths.
+Only a sentinel-owned extraction cache may be cleared, including after a crash;
+symbolic links and Windows directory junctions are rejected. Cleanup failures
+retain the original error and leave the previous active engine unchanged.
+
+All 139 SHA256-pinned Windows archives were downloaded, verified and inspected
+on macOS, covering 23,920 payload/metadata members. For a five-character Windows
+profile name at the default AppData location, the longest extraction path drops
+from 306 to 239 characters; the longest installed file path is 220 characters.
+Before downloading, setup checks file and directory limits using the audited
+paths and counts UTF-16 units, including non-BMP profile characters. It rejects
+an outdated audit when the package lock or installer checksum changes. This
+archive inspection is not a Windows execution test.
+
+To reproduce the audit, provide the directory containing the downloaded Windows
+archives (Python 3.14, or an older developer Python with `zstandard` installed):
+
+```bash
+python scripts/audit_windows_paths.py /path/to/windows/downloads
+```
+
+The command verifies every archive and compares its findings with
+`runtime/windows-paths.json`. Use `--write` when deliberately updating the
+pinned Windows packages, and review the resulting path limits. The scientific
+lock is unchanged by the audit, preserving existing engine activation records.
+
+For a real installation/repair/cancellation check, set
+`PYFORESTSCAN_ENGINE_ROOT` to a dedicated test location without an active engine,
+then run `python scripts/check_engine_install.py`. It exercises actual package
+linking and all worker tests, then removes only the test engine generations.
+Use `--keep` when the validated engine is needed for subsequent QGIS tests.
+
+Local verification on 2026-10-13, macOS Apple Silicon:
+
+| Check | Result |
+| --- | --- |
+| Installer unit suite | 33 tests, OK with 2 Windows-only skips |
+| Packaged QGIS 4.2.3 / Qt 6, native | 81 tests, OK with 3 intentional skips |
+| Packaged QGIS 3.40.3 / Qt 5, isolated engine | 81 tests, OK with 3 intentional skips |
+| Real osx-arm64 engine installation and repair | Both passed scientific self-tests |
+| Real cancellation during package linking | Previous activation and generations preserved; cache removed |
+| Repaired engine worker suite | All 15 tests passed |
+| Windows package path audit | All 139 archives verified; reproduced audit matches bundled JSON |
+
+The QGIS skips are the two Windows filesystem/junction tests and the separately
+executed worker scientific class. Ruff's E4/E7/E9/F checks and `git diff --check`
+passed. The Windows full-install CI job is configured but was not executed from
+this Mac; neither the path audit nor these macOS results claim a Windows runtime
+pass. Confirm the upgraded ZIP on the affected Windows/QGIS installation before
+calling that platform regression verified. The package remains experimental.
