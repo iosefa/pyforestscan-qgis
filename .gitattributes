@@ -1,0 +1,3 @@
+# Engine identity and the Windows path audit hash the exact lock-file bytes.
+# Windows checkouts must preserve the LF bytes shipped in the plugin ZIP.
+/runtime/locks/*.json text eol=lf
