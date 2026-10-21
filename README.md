@@ -15,7 +15,7 @@ has been tested. QGIS 4.0 itself has not been runtime-tested.
 
 ## Install
 
-1. Obtain the release ZIP (`pyforestscan_qgis-0.4.4.zip`), or build it with
+1. Download the **[QGIS installer ZIP, pyforestscan_qgis-0.4.4.zip](https://github.com/iosefa/pyforestscan-qgis/releases/download/v0.4.4/pyforestscan_qgis-0.4.4.zip)**, or build it with
    `scripts/package_plugin.sh` (output: `dist/pyforestscan_qgis.zip`).
 2. In QGIS, open **Plugins → Manage and Install Plugins → Install from ZIP**,
    select the ZIP, and enable **PyForestScan**.
@@ -27,6 +27,12 @@ has been tested. QGIS 4.0 itself has not been runtime-tested.
 4. If the dependency check fails or a tool needs the optional engine, open **Plugins →
    PyForestScan → Set up PyForestScan**, then click **Install engine**. Once
    validation finishes, rerun the tool. No terminal commands are needed.
+
+Select the downloaded ZIP directly in QGIS. GitHub also offers **Source code
+(zip)** and **Source code (tar.gz)**; those are development snapshots, not plugin
+installers. An error such as `No module named 'pyforestscan-qgis-0'` identifies
+the source ZIP's versioned folder. Remove that failed entry in QGIS's Plugin
+Manager, then install the QGIS installer ZIP linked above and restart QGIS.
 
 The ZIP includes the complete pure-Python source of released PyForestScan 0.4.1
 and laspy 2.7.0, their licenses, and offline help. Native processing uses QGIS's

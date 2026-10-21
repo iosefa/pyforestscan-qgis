@@ -162,6 +162,7 @@ PYFORESTSCAN_TEST_RUNTIME=1 \
 
 ```bash
 scripts/package_plugin.sh
+python scripts/check_plugin_zip.py dist/pyforestscan_qgis.zip --qgis
 export PYFORESTSCAN_PLUGIN_PATH="$PWD/dist/pyforestscan_qgis"
 QT_QPA_PLATFORM=offscreen PYFORESTSCAN_BACKEND=native \
   PYFORESTSCAN_TEST_RUNTIME=1 python -m unittest discover -s tests -v
@@ -172,6 +173,20 @@ repository while implementation, bundled dependencies and runtime manifests are
 loaded from the staged ZIP content. Repeat with `PYFORESTSCAN_BACKEND=engine`
 and run the private worker tests against the same staged directory. Unset the
 path variable before returning to source-tree tests.
+
+The ZIP check uses QGIS's normal plugin loader and the folder name actually
+inside the archive. This catches invalid source-archive folder names that tests
+loading files under an explicit `pyforestscan_qgis` alias would conceal. The
+builder also checks ZIP integrity, required files, Python syntax and the package
+root without needing QGIS; this check runs in its own CI job.
+
+On 2026-10-21, the published 0.4.4 asset (SHA256
+`318ae398ff1db07ed80c24a391326e6920b26a1c4008a9fa448583e2bc3afd4a`)
+passed archive checks and normal QGIS discovery, load, provider registration and
+unload on macOS with QGIS 3.40.3 and 4.2.3. All 11 algorithms registered. The
+automatic GitHub source ZIP reproduced `No module named 'pyforestscan-qgis-0'`
+and was rejected by the archive checker. These are plugin-loading checks, not
+new Windows engine or scientific-processing validation.
 
 GitHub Actions is configured to build/test the ZIP with Linux QGIS **3.40 using
 the isolated engine** and **4.2 using native processing**. Every push/PR also

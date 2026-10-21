@@ -37,6 +37,22 @@ experimental until the platform checks below support a stable designation.
 These checks follow QGIS's [publication requirements](https://plugins.qgis.org/docs/publish)
 and [required package files](https://docs.qgis.org/4.2/en/docs/pyqgis_developer_cookbook/plugins/releasing.html).
 
+## GitHub release downloads
+
+Upload the ZIP built by `scripts/package_plugin.sh` as the release asset
+`pyforestscan_qgis-<version>.zip`, together with its SHA256 checksum. Label the
+asset **INSTALL IN QGIS** and link directly to it at the top of the release notes.
+GitHub's automatic **Source code** archives wrap the repository in a folder such
+as `pyforestscan-qgis-0.4.4`. QGIS tries to import that folder name and fails with
+`No module named 'pyforestscan-qgis-0'`. Renaming the downloaded ZIP file alone
+does not change the folder inside it.
+
+The builder checks the actual archive structure and source syntax. Before
+publishing, run `python scripts/check_plugin_zip.py <zip> --qgis` with QGIS's
+Python interpreter. This extracts the ZIP into a disposable profile and uses
+QGIS's normal discovery, import, startup and unload paths. Download the published
+asset again, verify its SHA256, and repeat this check on those exact bytes.
+
 ## Submit the ZIP
 
 1. Sign in at [Upload a plugin](https://plugins.qgis.org/plugins/add/). The login

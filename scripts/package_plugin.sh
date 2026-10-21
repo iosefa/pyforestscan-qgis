@@ -39,4 +39,6 @@ find "${BUILD_DIR}" -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
   zip -qr "${ZIP_FILE}" "${PLUGIN_ID}"
 )
 
+python3 "${ROOT_DIR}/scripts/check_plugin_zip.py" "${ZIP_FILE}"
+
 echo "${ZIP_FILE}"
